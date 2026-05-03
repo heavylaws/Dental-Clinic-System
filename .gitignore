@@ -30,3 +30,6 @@ debug-*.ts
 
 # SSL certificates (private keys)
 certs/
+
+# Log files
+*.log
