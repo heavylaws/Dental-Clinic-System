@@ -45,9 +45,7 @@ export default function Appointments() {
     const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
 
     // Search state for patient picker
-    const [searchFirst, setSearchFirst] = useState("");
-    const [searchMiddle, setSearchMiddle] = useState("");
-    const [searchLast, setSearchLast] = useState("");
+    const [searchQuery, setSearchQuery] = useState("");
     const [selectedPatient, setSelectedPatient] = useState<any>(null);
 
     // Form state
@@ -71,9 +69,15 @@ export default function Appointments() {
     });
 
     const { data: searchResults = [] } = useQuery({
-        queryKey: ["patients", "search", { firstName: searchFirst, middleName: searchMiddle, lastName: searchLast }],
-        queryFn: () => api.patients.search({ firstName: searchFirst, middleName: searchMiddle, lastName: searchLast }),
-        enabled: (searchFirst.length >= 1 || searchMiddle.length >= 1 || searchLast.length >= 1) && showDialog,
+        queryKey: ["patients", "search", { q: searchQuery }],
+        queryFn: async () => {
+            if (searchQuery.trim().length > 0) {
+                return api.patients.search(searchQuery);
+            }
+            const res = await api.patients.list(1, 10);
+            return res.patients;
+        },
+        enabled: showDialog,
     });
 
     const createMutation = useMutation({
@@ -113,9 +117,7 @@ export default function Appointments() {
         setFormType("consultation");
         setFormNotes("");
         setSelectedPatient(null);
-        setSearchFirst("");
-        setSearchMiddle("");
-        setSearchLast("");
+        setSearchQuery("");
         setShowDialog(true);
     }
 
@@ -127,9 +129,7 @@ export default function Appointments() {
         setFormType(appt.type);
         setFormNotes(appt.notes || "");
         setSelectedPatient({ id: appt.patientId, firstName: appt.patientName.split(" ")[0], lastName: appt.patientName.split(" ").slice(1).join(" ") });
-        setSearchFirst("");
-        setSearchMiddle("");
-        setSearchLast("");
+        setSearchQuery("");
         setShowDialog(true);
     }
 
@@ -137,9 +137,7 @@ export default function Appointments() {
         setShowDialog(false);
         setEditingAppointment(null);
         setSelectedPatient(null);
-        setSearchFirst("");
-        setSearchMiddle("");
-        setSearchLast("");
+        setSearchQuery("");
     }
 
     function handleSubmit(e: React.FormEvent) {
@@ -277,9 +275,7 @@ export default function Appointments() {
                                             type="button"
                                             onClick={() => {
                                                 setSelectedPatient(null);
-                                                setSearchFirst("");
-                                                setSearchMiddle("");
-                                                setSearchLast("");
+                                                setSearchQuery("");
                                             }}
                                             className="ml-auto text-primary-400 hover:text-primary-600"
                                         >
@@ -288,30 +284,14 @@ export default function Appointments() {
                                     </div>
                                 ) : (
                                     <div className="relative">
-                                        <div className="grid grid-cols-3 gap-2">
-                                            <input
-                                                type="text"
-                                                value={searchFirst}
-                                                onChange={(e) => setSearchFirst(e.target.value)}
-                                                placeholder="First Name"
-                                                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 outline-none text-sm"
-                                                autoFocus
-                                            />
-                                            <input
-                                                type="text"
-                                                value={searchMiddle}
-                                                onChange={(e) => setSearchMiddle(e.target.value)}
-                                                placeholder="Father Name"
-                                                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 outline-none text-sm"
-                                            />
-                                            <input
-                                                type="text"
-                                                value={searchLast}
-                                                onChange={(e) => setSearchLast(e.target.value)}
-                                                placeholder="Last Name"
-                                                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 outline-none text-sm"
-                                            />
-                                        </div>
+                                        <input
+                                            type="text"
+                                            value={searchQuery}
+                                            onChange={(e) => setSearchQuery(e.target.value)}
+                                            placeholder="Search existing patient by name or phone..."
+                                            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 outline-none text-sm"
+                                            autoFocus
+                                        />
                                         {searchResults.length > 0 && (
                                             <div className="absolute top-full left-0 right-0 mt-1 bg-white border rounded-lg shadow-lg max-h-40 overflow-y-auto z-10">
                                                 {searchResults.map((p: any) => {
@@ -323,9 +303,7 @@ export default function Appointments() {
                                                             type="button"
                                                             onClick={() => {
                                                                 setSelectedPatient(p);
-                                                                setSearchFirst("");
-                                                                setSearchMiddle("");
-                                                                setSearchLast("");
+                                                                setSearchQuery("");
                                                             }}
                                                             className="w-full text-left px-3 py-2 hover:bg-primary-50 transition text-sm flex items-center justify-between"
                                                         >

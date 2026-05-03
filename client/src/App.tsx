@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
+import MobileApp from "./mobile/MobileApp";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "./lib/api";
 import Login from "./pages/Login";
@@ -48,10 +49,21 @@ export default function App() {
     }
 
     // Backend is ready — render normal app
-    return <AppContent />;
+    return <AppRouter />;
 }
 
-function AppContent() {
+function AppRouter() {
+    const location = useLocation();
+
+    // Route to mobile app for /m/* paths
+    if (location.pathname.startsWith("/m")) {
+        return <MobileApp />;
+    }
+
+    return <DesktopApp />;
+}
+
+function DesktopApp() {
     const { data: user, isLoading } = useQuery({
         queryKey: ["auth", "me"],
         queryFn: api.auth.me,
