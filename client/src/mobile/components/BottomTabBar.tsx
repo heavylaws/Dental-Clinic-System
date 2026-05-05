@@ -10,10 +10,11 @@ interface TabItem {
 }
 
 const TABS: TabItem[] = [
-  { path: "/m", label: "Queue", icon: "📋", activeIcon: "📋", roles: ["admin", "doctor", "reception"] },
-  { path: "/m/patients", label: "Patients", icon: "👥", activeIcon: "👥", roles: ["admin", "doctor", "reception"] },
-  { path: "/m/appointments", label: "Appts", icon: "📅", activeIcon: "📅", roles: ["admin", "doctor", "reception"] },
-  { path: "/m/billing", label: "Billing", icon: "💰", activeIcon: "💰", roles: ["admin", "reception"] },
+  { path: "/m", label: "Queue", icon: "📋", activeIcon: "📋", roles: ["admin", "doctor", "reception", "staff"] },
+  { path: "/m/patients", label: "Patients", icon: "👥", activeIcon: "👥", roles: ["admin", "doctor", "reception", "staff"] },
+  { path: "/m/appointments", label: "Appts", icon: "📅", activeIcon: "📅", roles: ["admin", "doctor", "reception", "staff"] },
+  { path: "/m/billing", label: "Billing", icon: "💰", activeIcon: "💰", roles: ["admin", "reception", "staff"] },
+  { path: "/m/settings", label: "More", icon: "⚙️", activeIcon: "⚙️", roles: ["admin", "doctor", "reception", "staff"] },
 ];
 
 interface BottomTabBarProps {

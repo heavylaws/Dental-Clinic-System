@@ -45,9 +45,12 @@ export default function MobileDialog({ open, onClose, title, children, fullScree
         style={{
           transform: open ? `translateY(${dragY}px)` : "translateY(100%)",
           height: fullScreen ? "94vh" : undefined,
+          display: "flex",
+          flexDirection: "column",
+          overflowY: "hidden", // Prevent outer scroll, let inner flex-1 scroll
         }}
       >
-        <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}>
+        <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} style={{ flexShrink: 0 }}>
           <div className="bottom-sheet-handle" />
         </div>
         {title && (
@@ -55,6 +58,7 @@ export default function MobileDialog({ open, onClose, title, children, fullScree
             display: "flex", alignItems: "center", justifyContent: "space-between",
             padding: "4px 20px 16px",
             borderBottom: "1px solid rgba(255,255,255,0.06)",
+            flexShrink: 0,
           }}>
             <h2 style={{
               fontSize: "1.15rem", fontWeight: 800, margin: 0,
@@ -71,7 +75,7 @@ export default function MobileDialog({ open, onClose, title, children, fullScree
             </button>
           </div>
         )}
-        <div style={{ padding: "16px 20px", overflowY: "auto" }}>{children}</div>
+        <div style={{ padding: "16px 20px 60px", overflowY: "auto", flex: 1, WebkitOverflowScrolling: "touch" }}>{children}</div>
       </div>
     </>
   );

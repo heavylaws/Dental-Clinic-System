@@ -8,6 +8,8 @@ import MobilePatientSearch from "./pages/MobilePatientSearch";
 import MobileVisitForm from "./pages/MobileVisitForm";
 import MobileAppointments from "./pages/MobileAppointments";
 import MobileBilling from "./pages/MobileBilling";
+import MobileSettings from "./pages/MobileSettings";
+import MobileReports from "./pages/MobileReports";
 import "./mobile.css";
 
 export default function MobileApp() {
@@ -55,6 +57,8 @@ export default function MobileApp() {
         <Route path="visit/:visitId" element={<MobileVisitForm user={user} />} />
         <Route path="appointments" element={<MobileAppointments />} />
         <Route path="billing" element={<MobileBilling />} />
+        <Route path="settings" element={<MobileSettings user={user} />} />
+        <Route path="reports" element={<MobileReports />} />
       </Route>
       <Route path="*" element={<Navigate to="/m" replace />} />
     </Routes>
