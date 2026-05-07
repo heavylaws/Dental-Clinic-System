@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "../../db/index.js";
-import { visits, patients, billings, diagnoses, prescriptions, medicalTerms } from "../../db/schema.js";
+import { visits, patients, billings, dentalFindings, prescriptions, medicalTerms } from "../../db/schema.js";
 import { eq, sql, desc, count, and, gte, lte, ilike } from "drizzle-orm"; // Add ilike import
 
 import { requireAuth, requireRole } from "../auth/index.js";
@@ -82,16 +82,16 @@ router.get("/monthly", async (req, res) => {
             .from(billings)
             .where(and(gte(billings.createdAt, startDate), lte(billings.createdAt, endDate)));
 
-        // Top diagnoses
+        // Top findings
         const topDiagnoses = await db
             .select({
-                name: diagnoses.name,
+                name: dentalFindings.findingType,
                 count: count(),
             })
-            .from(diagnoses)
-            .innerJoin(visits, eq(diagnoses.visitId, visits.id))
+            .from(dentalFindings)
+            .innerJoin(visits, eq(dentalFindings.visitId, visits.id))
             .where(and(gte(visits.startedAt, startDate), lte(visits.startedAt, endDate)))
-            .groupBy(diagnoses.name)
+            .groupBy(dentalFindings.findingType)
             .orderBy(desc(count()))
             .limit(10);
 

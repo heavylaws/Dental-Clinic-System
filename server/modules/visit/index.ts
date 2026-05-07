@@ -2,15 +2,21 @@ import { Router } from "express";
 import { db } from "../../db/index.js";
 import {
     visits,
-    diagnoses,
+    dentalFindings,
     prescriptions,
     labOrders,
-    procedureLogs,
+    dentalProcedures,
     billings,
     patients,
 } from "../../db/schema.js";
-import { eq, desc, and, sql, count } from "drizzle-orm";
-import { insertVisitSchema, insertDiagnosisSchema, insertPrescriptionSchema, insertLabOrderSchema, insertProcedureSchema } from "../../../shared/types.js";
+import { eq, desc, sql, count } from "drizzle-orm";
+import {
+    insertVisitSchema,
+    insertDentalFindingSchema,
+    insertPrescriptionSchema,
+    insertLabOrderSchema,
+    insertDentalProcedureSchema
+} from "../../../shared/types.js";
 import { requireAuth } from "../auth/index.js";
 import { broadcast } from "../../ws.js";
 import { learnTerm } from "../autocomplete/index.js";
@@ -56,11 +62,11 @@ router.get("/patient/:patientId", async (req, res) => {
         const patientVisits = await db.query.visits.findMany({
             where: eq(visits.patientId, req.params.patientId),
             with: {
-                diagnoses: true,
+                dentalFindings: true,
                 prescriptions: true,
                 labOrders: true,
-                procedures: true,
-                images: true,
+                dentalProcedures: true,
+                dentalMedia: true,
                 billing: {
                     with: {
                         payments: true,
@@ -84,11 +90,11 @@ router.get("/:id", async (req, res) => {
             where: eq(visits.id, req.params.id),
             with: {
                 patient: true,
-                diagnoses: true,
+                dentalFindings: true,
                 prescriptions: true,
                 labOrders: true,
-                procedures: true,
-                images: true,
+                dentalProcedures: true,
+                dentalMedia: true,
                 billing: {
                     with: {
                         payments: true,
@@ -214,53 +220,66 @@ router.patch("/:id/notes", async (req, res) => {
     }
 });
 
-// ─── Add diagnosis ──────────────────────────────────────────────────
+// ─── Add finding ────────────────────────────────────────────────────
 
-router.post("/:id/diagnoses", async (req, res) => {
+router.post("/:id/findings", async (req, res) => {
     try {
-        const data = insertDiagnosisSchema.parse({ ...req.body, visitId: req.params.id });
-        const [diagnosis] = await db.insert(diagnoses).values(data).returning();
+        const data = insertDentalFindingSchema.parse({ ...req.body, visitId: req.params.id });
+        
+        // Ensure patientId is fetched from visit
+        const visit = await db.query.visits.findFirst({
+            where: eq(visits.id, req.params.id),
+            columns: { patientId: true }
+        });
+        
+        if (!visit) return res.status(404).json({ error: "Visit not found" });
+
+        const [finding] = await db.insert(dentalFindings).values({
+            ...data,
+            patientId: visit.patientId,
+            diagnosedBy: (req.user as any)?.id
+        }).returning();
 
         // Learn the term
-        await learnTerm("diagnosis", data.name);
+        await learnTerm("dental_finding", data.findingType);
 
-        res.status(201).json(diagnosis);
+        res.status(201).json(finding);
     } catch (error: any) {
         if (error.name === "ZodError") return res.status(400).json({ error: error.errors });
         res.status(500).json({ error: error.message });
     }
 });
 
-// ─── Delete diagnosis ───────────────────────────────────────────────
+// ─── Delete finding ─────────────────────────────────────────────────
 
-router.delete("/diagnoses/:diagId", async (req, res) => {
+router.delete("/findings/:findingId", async (req, res) => {
     try {
-        await db.delete(diagnoses).where(eq(diagnoses.id, req.params.diagId));
+        await db.delete(dentalFindings).where(eq(dentalFindings.id, req.params.findingId));
         res.json({ success: true });
     } catch (error: any) {
         res.status(500).json({ error: error.message });
     }
 });
 
-// ─── Update diagnosis name ──────────────────────────────────────────
+// ─── Update finding ─────────────────────────────────────────────────
 
-router.patch("/diagnoses/:diagId", async (req, res) => {
+router.patch("/findings/:findingId", async (req, res) => {
     try {
-        const { name } = req.body;
-        if (!name) return res.status(400).json({ error: "Name is required" });
+        const updateData = req.body; // In real app, validate with Zod
 
-        const [diagnosis] = await db
-            .update(diagnoses)
-            .set({ name })
-            .where(eq(diagnoses.id, req.params.diagId))
+        const [finding] = await db
+            .update(dentalFindings)
+            .set(updateData)
+            .where(eq(dentalFindings.id, req.params.findingId))
             .returning();
 
-        if (!diagnosis) return res.status(404).json({ error: "Diagnosis not found" });
+        if (!finding) return res.status(404).json({ error: "Finding not found" });
 
-        // Re-learn the term
-        await learnTerm("diagnosis", name);
+        if (updateData.findingType) {
+            await learnTerm("dental_finding", updateData.findingType);
+        }
 
-        res.json(diagnosis);
+        res.json(finding);
     } catch (error: any) {
         res.status(500).json({ error: error.message });
     }
@@ -324,13 +343,24 @@ router.delete("/lab-orders/:labId", async (req, res) => {
 
 router.post("/:id/procedures", async (req, res) => {
     try {
-        const data = insertProcedureSchema.parse({ ...req.body, visitId: req.params.id });
-        const [proc] = await db.insert(procedureLogs).values({
+        const data = insertDentalProcedureSchema.parse({ ...req.body, visitId: req.params.id });
+        
+        const visit = await db.query.visits.findFirst({
+            where: eq(visits.id, req.params.id),
+            columns: { patientId: true }
+        });
+        
+        if (!visit) return res.status(404).json({ error: "Visit not found" });
+
+        const [proc] = await db.insert(dentalProcedures).values({
             ...data,
+            patientId: visit.patientId,
             cost: data.cost || undefined,
+            performedBy: (req.user as any)?.id,
+            status: "completed"
         }).returning();
 
-        await learnTerm("procedure", data.procedureName);
+        await learnTerm("dental_procedure", data.procedureName);
 
         res.status(201).json(proc);
     } catch (error: any) {
@@ -343,7 +373,7 @@ router.post("/:id/procedures", async (req, res) => {
 
 router.delete("/procedures/:procId", async (req, res) => {
     try {
-        await db.delete(procedureLogs).where(eq(procedureLogs.id, req.params.procId));
+        await db.delete(dentalProcedures).where(eq(dentalProcedures.id, req.params.procId));
         res.json({ success: true });
     } catch (error: any) {
         res.status(500).json({ error: error.message });

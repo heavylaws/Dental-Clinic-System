@@ -10,7 +10,6 @@ import {
     jsonb,
     serial,
     bigserial,
-    inet,
     index,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
@@ -60,7 +59,7 @@ export const patients = pgTable(
     ]
 );
 
-// ─── Visits ─────────────────────────────────────────────────────────
+// ─── Visits (Dental Encounters) ─────────────────────────────────────
 
 export const visits = pgTable(
     "visits",
@@ -86,17 +85,158 @@ export const visits = pgTable(
     ]
 );
 
-// ─── Diagnoses ──────────────────────────────────────────────────────
+// ─── Dental Charts ──────────────────────────────────────────────────
 
-export const diagnoses = pgTable("diagnoses", {
+export const dentalCharts = pgTable("dental_charts", {
     id: uuid("id").primaryKey().defaultRandom(),
+    patientId: uuid("patient_id")
+        .notNull()
+        .references(() => patients.id, { onDelete: "cascade" }),
+    chartDate: timestamp("chart_date").notNull().defaultNow(),
+    chartType: varchar("chart_type", { length: 50 }).notNull().default("existing"), // initial, existing, proposed, completed
+    dentistId: uuid("dentist_id").references(() => users.id),
+    notes: text("notes"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// ─── Tooth Records ──────────────────────────────────────────────────
+
+export const toothRecords = pgTable("tooth_records", {
+    id: uuid("id").primaryKey().defaultRandom(),
+    patientId: uuid("patient_id")
+        .notNull()
+        .references(() => patients.id, { onDelete: "cascade" }),
+    chartId: uuid("chart_id")
+        .notNull()
+        .references(() => dentalCharts.id, { onDelete: "cascade" }),
+    toothCode: varchar("tooth_code", { length: 10 }).notNull(),
+    notationSystem: varchar("notation_system", { length: 20 }).default("fdi"),
+    dentition: varchar("dentition", { length: 20 }), // permanent, primary
+    arch: varchar("arch", { length: 10 }), // upper, lower
+    quadrant: integer("quadrant"),
+    toothType: varchar("tooth_type", { length: 20 }), // incisor, canine, premolar, molar
+    status: varchar("status", { length: 50 }).default("present"), // present, missing, extracted, impacted, unerupted, root_remnant, implant, crown, bridge_pontic
+    mobility: varchar("mobility", { length: 20 }),
+    prognosis: varchar("prognosis", { length: 50 }),
+    notes: text("notes"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// ─── Dental Findings ────────────────────────────────────────────────
+
+export const dentalFindings = pgTable("dental_findings", {
+    id: uuid("id").primaryKey().defaultRandom(),
+    patientId: uuid("patient_id")
+        .notNull()
+        .references(() => patients.id, { onDelete: "cascade" }),
+    visitId: uuid("visit_id").references(() => visits.id),
+    chartId: uuid("chart_id").references(() => dentalCharts.id),
+    toothCode: varchar("tooth_code", { length: 10 }),
+    surfaces: jsonb("surfaces"), // e.g. ["M", "O", "D"]
+    findingType: varchar("finding_type", { length: 100 }).notNull(), // caries, fracture, restoration, missing, abscess, sensitivity, gingivitis, periodontitis, impaction, periapical_lesion, other
+    severity: varchar("severity", { length: 50 }),
+    description: text("description"),
+    status: varchar("status", { length: 20 }).notNull().default("active"), // active, resolved, monitoring
+    diagnosedAt: timestamp("diagnosed_at").notNull().defaultNow(),
+    diagnosedBy: uuid("diagnosed_by").references(() => users.id),
+});
+
+// ─── Treatment Plans ────────────────────────────────────────────────
+
+export const treatmentPlans = pgTable("treatment_plans", {
+    id: uuid("id").primaryKey().defaultRandom(),
+    patientId: uuid("patient_id")
+        .notNull()
+        .references(() => patients.id, { onDelete: "cascade" }),
+    title: varchar("title", { length: 200 }).notNull(),
+    status: varchar("status", { length: 50 }).notNull().default("draft"), // draft, presented, accepted, partially_completed, completed, cancelled
+    priority: varchar("priority", { length: 20 }).default("normal"),
+    totalEstimatedCost: decimal("total_estimated_cost", { precision: 15, scale: 2 }).default("0"),
+    notes: text("notes"),
+    createdBy: uuid("created_by").references(() => users.id),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// ─── Treatment Plan Items ───────────────────────────────────────────
+
+export const treatmentPlanItems = pgTable("treatment_plan_items", {
+    id: uuid("id").primaryKey().defaultRandom(),
+    treatmentPlanId: uuid("treatment_plan_id")
+        .notNull()
+        .references(() => treatmentPlans.id, { onDelete: "cascade" }),
+    patientId: uuid("patient_id")
+        .notNull()
+        .references(() => patients.id, { onDelete: "cascade" }),
+    toothCode: varchar("tooth_code", { length: 10 }),
+    surfaces: jsonb("surfaces"),
+    procedureCode: varchar("procedure_code", { length: 50 }),
+    procedureName: varchar("procedure_name", { length: 500 }).notNull(),
+    description: text("description"),
+    estimatedCost: decimal("estimated_cost", { precision: 15, scale: 2 }).default("0"),
+    discount: decimal("discount", { precision: 15, scale: 2 }).default("0"),
+    status: varchar("status", { length: 50 }).notNull().default("proposed"), // proposed, accepted, scheduled, in_progress, completed, cancelled
+    sequenceOrder: integer("sequence_order").default(0),
+    appointmentId: uuid("appointment_id"), // defined after appointments table if we used relations directly, here we use strings
+    completedVisitId: uuid("completed_visit_id").references(() => visits.id),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// ─── Dental Procedures ──────────────────────────────────────────────
+
+export const dentalProcedures = pgTable("dental_procedures", {
+    id: uuid("id").primaryKey().defaultRandom(),
+    patientId: uuid("patient_id")
+        .notNull()
+        .references(() => patients.id, { onDelete: "cascade" }),
     visitId: uuid("visit_id")
         .notNull()
         .references(() => visits.id, { onDelete: "cascade" }),
+    treatmentPlanItemId: uuid("treatment_plan_item_id").references(() => treatmentPlanItems.id),
+    toothCode: varchar("tooth_code", { length: 10 }),
+    surfaces: jsonb("surfaces"),
+    procedureCode: varchar("procedure_code", { length: 50 }),
+    procedureName: varchar("procedure_name", { length: 500 }).notNull(),
+    category: varchar("category", { length: 100 }), // diagnostic, preventive, restorative, endodontic, periodontic, prosthodontic, oral_surgery, orthodontic, implant, cosmetic, emergency, other
+    notes: text("notes"),
+    cost: decimal("cost", { precision: 15, scale: 2 }).default("0"),
+    status: varchar("status", { length: 50 }).notNull().default("completed"), // planned, in_progress, completed, cancelled
+    performedBy: uuid("performed_by").references(() => users.id),
+    performedAt: timestamp("performed_at").notNull().defaultNow(),
+});
+
+// ─── Dental Procedure Catalog ───────────────────────────────────────
+
+export const dentalProcedureCatalog = pgTable("dental_procedure_catalog", {
+    id: uuid("id").primaryKey().defaultRandom(),
+    code: varchar("code", { length: 50 }), // e.g. ADA code or local code
     name: varchar("name", { length: 500 }).notNull(),
-    icdCode: varchar("icd_code", { length: 20 }),
-    description: text("description"),
-    severity: varchar("severity", { length: 20 }),
+    category: varchar("category", { length: 100 }).notNull(),
+    defaultPrice: decimal("default_price", { precision: 15, scale: 2 }).default("0"),
+    durationMinutes: integer("duration_minutes").default(30),
+    requiresTooth: boolean("requires_tooth").default(false),
+    requiresSurface: boolean("requires_surface").default(false),
+    isActive: boolean("is_active").default(true),
+});
+
+// ─── Dental Media ───────────────────────────────────────────────────
+
+export const dentalMedia = pgTable("dental_media", {
+    id: uuid("id").primaryKey().defaultRandom(),
+    patientId: uuid("patient_id")
+        .notNull()
+        .references(() => patients.id, { onDelete: "cascade" }),
+    visitId: uuid("visit_id").references(() => visits.id),
+    toothCode: varchar("tooth_code", { length: 10 }),
+    mediaType: varchar("media_type", { length: 50 }).notNull().default("other"), // intraoral_photo, xray, panoramic, cephalometric, cbct, document, other
+    filePath: varchar("file_path", { length: 1000 }).notNull(),
+    originalFilename: varchar("original_filename", { length: 500 }),
+    caption: text("caption"),
+    takenAt: timestamp("taken_at").notNull().defaultNow(),
+    uploadedBy: uuid("uploaded_by").references(() => users.id),
 });
 
 // ─── Prescriptions ──────────────────────────────────────────────────
@@ -128,17 +268,35 @@ export const labOrders = pgTable("lab_orders", {
     resultedAt: timestamp("resulted_at"),
 });
 
-// ─── Procedures ─────────────────────────────────────────────────────
+// ─── Recalls ────────────────────────────────────────────────────────
 
-export const procedureLogs = pgTable("procedure_logs", {
+export const recalls = pgTable("recalls", {
     id: uuid("id").primaryKey().defaultRandom(),
-    visitId: uuid("visit_id")
+    patientId: uuid("patient_id")
         .notNull()
-        .references(() => visits.id, { onDelete: "cascade" }),
-    procedureName: varchar("procedure_name", { length: 500 }).notNull(),
-    details: text("details"),
-    cost: decimal("cost", { precision: 15, scale: 2 }),
-    performedAt: timestamp("performed_at").notNull().defaultNow(),
+        .references(() => patients.id, { onDelete: "cascade" }),
+    recallType: varchar("recall_type", { length: 100 }).notNull(), // cleaning, checkup, post_op, ortho, implant, perio, other
+    dueDate: timestamp("due_date").notNull(),
+    status: varchar("status", { length: 50 }).notNull().default("pending"), // pending, scheduled, completed, missed, cancelled
+    notes: text("notes"),
+});
+
+// ─── Consent Forms ──────────────────────────────────────────────────
+
+export const consentForms = pgTable("consent_forms", {
+    id: uuid("id").primaryKey().defaultRandom(),
+    patientId: uuid("patient_id")
+        .notNull()
+        .references(() => patients.id, { onDelete: "cascade" }),
+    visitId: uuid("visit_id").references(() => visits.id),
+    treatmentPlanId: uuid("treatment_plan_id").references(() => treatmentPlans.id),
+    formType: varchar("form_type", { length: 100 }).notNull(),
+    title: varchar("title", { length: 200 }).notNull(),
+    body: text("body"),
+    signedAt: timestamp("signed_at"),
+    signaturePath: varchar("signature_path", { length: 1000 }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 // ─── Billing ────────────────────────────────────────────────────────
@@ -179,27 +337,13 @@ export const payments = pgTable("payments", {
     paidAt: timestamp("paid_at").notNull().defaultNow(),
 });
 
-// ─── Patient Images ─────────────────────────────────────────────────
-
-export const patientImages = pgTable("patient_images", {
-    id: uuid("id").primaryKey().defaultRandom(),
-    patientId: uuid("patient_id")
-        .notNull()
-        .references(() => patients.id, { onDelete: "cascade" }),
-    visitId: uuid("visit_id").references(() => visits.id),
-    filePath: varchar("file_path", { length: 1000 }).notNull(),
-    legacyPath: varchar("legacy_path", { length: 1000 }),
-    caption: text("caption"),
-    capturedAt: timestamp("captured_at").notNull().defaultNow(),
-});
-
-// ─── Medical Terms (Autocomplete Knowledge Base) ────────────────────
+// ─── Medical Terms ──────────────────────────────────────────────────
 
 export const medicalTerms = pgTable(
     "medical_terms",
     {
         id: uuid("id").primaryKey().defaultRandom(),
-        category: varchar("category", { length: 50 }).notNull(), // diagnosis, medication, lab_test, procedure, complaint
+        category: varchar("category", { length: 50 }).notNull(), // medication, lab_test, complaint
         term: varchar("term", { length: 500 }).notNull(),
         language: varchar("language", { length: 5 }).default("fr"),
         usageCount: integer("usage_count").notNull().default(1),
@@ -318,7 +462,14 @@ export const auditLogs = pgTable(
 
 export const patientRelations = relations(patients, ({ many }) => ({
     visits: many(visits),
-    images: many(patientImages),
+    dentalCharts: many(dentalCharts),
+    toothRecords: many(toothRecords),
+    dentalFindings: many(dentalFindings),
+    treatmentPlans: many(treatmentPlans),
+    dentalProcedures: many(dentalProcedures),
+    dentalMedia: many(dentalMedia),
+    recalls: many(recalls),
+    consentForms: many(consentForms),
     appointments: many(appointments),
     followUps: many(followUps),
     referrals: many(referrals),
@@ -333,12 +484,12 @@ export const visitRelations = relations(visits, ({ one, many }) => ({
         fields: [visits.doctorId],
         references: [users.id],
     }),
-    diagnoses: many(diagnoses),
+    dentalFindings: many(dentalFindings),
+    dentalProcedures: many(dentalProcedures),
     prescriptions: many(prescriptions),
     labOrders: many(labOrders),
-    procedures: many(procedureLogs),
     billing: one(billings),
-    images: many(patientImages),
+    dentalMedia: many(dentalMedia),
     followUps: many(followUps),
     referrals: many(referrals),
 }));
@@ -351,6 +502,141 @@ export const appointmentRelations = relations(appointments, ({ one }) => ({
     doctor: one(users, {
         fields: [appointments.doctorId],
         references: [users.id],
+    }),
+}));
+
+export const dentalChartRelations = relations(dentalCharts, ({ one, many }) => ({
+    patient: one(patients, {
+        fields: [dentalCharts.patientId],
+        references: [patients.id],
+    }),
+    dentist: one(users, {
+        fields: [dentalCharts.dentistId],
+        references: [users.id],
+    }),
+    toothRecords: many(toothRecords),
+    dentalFindings: many(dentalFindings),
+}));
+
+export const toothRecordRelations = relations(toothRecords, ({ one }) => ({
+    patient: one(patients, {
+        fields: [toothRecords.patientId],
+        references: [patients.id],
+    }),
+    chart: one(dentalCharts, {
+        fields: [toothRecords.chartId],
+        references: [dentalCharts.id],
+    }),
+}));
+
+export const dentalFindingRelations = relations(dentalFindings, ({ one }) => ({
+    patient: one(patients, {
+        fields: [dentalFindings.patientId],
+        references: [patients.id],
+    }),
+    visit: one(visits, {
+        fields: [dentalFindings.visitId],
+        references: [visits.id],
+    }),
+    chart: one(dentalCharts, {
+        fields: [dentalFindings.chartId],
+        references: [dentalCharts.id],
+    }),
+    diagnosedByUser: one(users, {
+        fields: [dentalFindings.diagnosedBy],
+        references: [users.id],
+    }),
+}));
+
+export const treatmentPlanRelations = relations(treatmentPlans, ({ one, many }) => ({
+    patient: one(patients, {
+        fields: [treatmentPlans.patientId],
+        references: [patients.id],
+    }),
+    createdByUser: one(users, {
+        fields: [treatmentPlans.createdBy],
+        references: [users.id],
+    }),
+    items: many(treatmentPlanItems),
+    consentForms: many(consentForms),
+}));
+
+export const treatmentPlanItemRelations = relations(treatmentPlanItems, ({ one, many }) => ({
+    treatmentPlan: one(treatmentPlans, {
+        fields: [treatmentPlanItems.treatmentPlanId],
+        references: [treatmentPlans.id],
+    }),
+    patient: one(patients, {
+        fields: [treatmentPlanItems.patientId],
+        references: [patients.id],
+    }),
+    completedVisit: one(visits, {
+        fields: [treatmentPlanItems.completedVisitId],
+        references: [visits.id],
+    }),
+    dentalProcedures: many(dentalProcedures),
+}));
+
+export const dentalProcedureRelations = relations(dentalProcedures, ({ one }) => ({
+    patient: one(patients, {
+        fields: [dentalProcedures.patientId],
+        references: [patients.id],
+    }),
+    visit: one(visits, {
+        fields: [dentalProcedures.visitId],
+        references: [visits.id],
+    }),
+    treatmentPlanItem: one(treatmentPlanItems, {
+        fields: [dentalProcedures.treatmentPlanItemId],
+        references: [treatmentPlanItems.id],
+    }),
+    performedByUser: one(users, {
+        fields: [dentalProcedures.performedBy],
+        references: [users.id],
+    }),
+}));
+
+export const dentalMediaRelations = relations(dentalMedia, ({ one }) => ({
+    patient: one(patients, {
+        fields: [dentalMedia.patientId],
+        references: [patients.id],
+    }),
+    visit: one(visits, {
+        fields: [dentalMedia.visitId],
+        references: [visits.id],
+    }),
+    uploadedByUser: one(users, {
+        fields: [dentalMedia.uploadedBy],
+        references: [users.id],
+    }),
+}));
+
+export const prescriptionRelations = relations(prescriptions, ({ one }) => ({
+    visit: one(visits, {
+        fields: [prescriptions.visitId],
+        references: [visits.id],
+    }),
+}));
+
+export const labOrderRelations = relations(labOrders, ({ one }) => ({
+    visit: one(visits, {
+        fields: [labOrders.visitId],
+        references: [visits.id],
+    }),
+}));
+
+export const billingRelations = relations(billings, ({ one, many }) => ({
+    visit: one(visits, {
+        fields: [billings.visitId],
+        references: [visits.id],
+    }),
+    payments: many(payments),
+}));
+
+export const paymentRelations = relations(payments, ({ one }) => ({
+    billing: one(billings, {
+        fields: [payments.billingId],
+        references: [billings.id],
     }),
 }));
 
@@ -376,57 +662,25 @@ export const referralRelations = relations(referrals, ({ one }) => ({
     }),
 }));
 
-export const diagnosisRelations = relations(diagnoses, ({ one }) => ({
-    visit: one(visits, {
-        fields: [diagnoses.visitId],
-        references: [visits.id],
-    }),
-}));
-
-export const prescriptionRelations = relations(prescriptions, ({ one }) => ({
-    visit: one(visits, {
-        fields: [prescriptions.visitId],
-        references: [visits.id],
-    }),
-}));
-
-export const labOrderRelations = relations(labOrders, ({ one }) => ({
-    visit: one(visits, {
-        fields: [labOrders.visitId],
-        references: [visits.id],
-    }),
-}));
-
-export const procedureLogRelations = relations(procedureLogs, ({ one }) => ({
-    visit: one(visits, {
-        fields: [procedureLogs.visitId],
-        references: [visits.id],
-    }),
-}));
-
-export const billingRelations = relations(billings, ({ one, many }) => ({
-    visit: one(visits, {
-        fields: [billings.visitId],
-        references: [visits.id],
-    }),
-    payments: many(payments),
-}));
-
-export const paymentRelations = relations(payments, ({ one }) => ({
-    billing: one(billings, {
-        fields: [payments.billingId],
-        references: [billings.id],
-    }),
-}));
-
-export const patientImageRelations = relations(patientImages, ({ one }) => ({
+export const recallRelations = relations(recalls, ({ one }) => ({
     patient: one(patients, {
-        fields: [patientImages.patientId],
+        fields: [recalls.patientId],
+        references: [patients.id],
+    }),
+}));
+
+export const consentFormRelations = relations(consentForms, ({ one }) => ({
+    patient: one(patients, {
+        fields: [consentForms.patientId],
         references: [patients.id],
     }),
     visit: one(visits, {
-        fields: [patientImages.visitId],
+        fields: [consentForms.visitId],
         references: [visits.id],
+    }),
+    treatmentPlan: one(treatmentPlans, {
+        fields: [consentForms.treatmentPlanId],
+        references: [treatmentPlans.id],
     }),
 }));
 
@@ -438,13 +692,20 @@ export type Patient = typeof patients.$inferSelect;
 export type NewPatient = typeof patients.$inferInsert;
 export type Visit = typeof visits.$inferSelect;
 export type NewVisit = typeof visits.$inferInsert;
-export type Diagnosis = typeof diagnoses.$inferSelect;
+export type DentalChart = typeof dentalCharts.$inferSelect;
+export type ToothRecord = typeof toothRecords.$inferSelect;
+export type DentalFinding = typeof dentalFindings.$inferSelect;
+export type TreatmentPlan = typeof treatmentPlans.$inferSelect;
+export type TreatmentPlanItem = typeof treatmentPlanItems.$inferSelect;
+export type DentalProcedure = typeof dentalProcedures.$inferSelect;
+export type DentalProcedureCatalog = typeof dentalProcedureCatalog.$inferSelect;
+export type DentalMedia = typeof dentalMedia.$inferSelect;
 export type Prescription = typeof prescriptions.$inferSelect;
 export type LabOrder = typeof labOrders.$inferSelect;
-export type ProcedureLog = typeof procedureLogs.$inferSelect;
+export type Recall = typeof recalls.$inferSelect;
+export type ConsentForm = typeof consentForms.$inferSelect;
 export type Billing = typeof billings.$inferSelect;
 export type Payment = typeof payments.$inferSelect;
-export type PatientImage = typeof patientImages.$inferSelect;
 export type MedicalTerm = typeof medicalTerms.$inferSelect;
 export type AuditLog = typeof auditLogs.$inferSelect;
 export type Appointment = typeof appointments.$inferSelect;

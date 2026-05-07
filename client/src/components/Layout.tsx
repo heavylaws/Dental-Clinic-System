@@ -56,9 +56,9 @@ export default function Layout({ user }: LayoutProps) {
                     {/* Logo & Links */}
                     <div className="flex items-center gap-8">
                         <Link to="/" className="flex items-center gap-2 hover:opacity-80 transition">
-                            <span className="text-2xl">🩺</span>
+                            <span className="text-2xl">🦷</span>
                             <span className="text-xl font-extrabold text-primary-900 hidden sm:inline">
-                                DermClinic
+                                DentalClinic
                             </span>
                         </Link>
 

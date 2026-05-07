@@ -19,6 +19,10 @@ import { settingsRouter } from "./modules/settings/index.js";
 import { followUpRouter } from "./modules/followup/index.js";
 import { referralRouter } from "./modules/referral/index.js";
 import { aiRouter } from "./modules/ai/index.js";
+import { dentalChartRouter } from "./modules/dental_chart/index.js";
+import { treatmentPlanRouter } from "./modules/treatment_plan/index.js";
+import { procedureCatalogRouter } from "./modules/procedure_catalog/index.js";
+import { recallsRouter } from "./modules/recalls/index.js";
 import { setupWebSocket } from "./ws.js";
 import path from "path";
 
@@ -59,6 +63,10 @@ app.use("/api/settings", settingsRouter);
 app.use("/api/followups", followUpRouter);
 app.use("/api/referrals", referralRouter);
 app.use("/api/ai", aiRouter);
+app.use("/api/dental-charts", dentalChartRouter);
+app.use("/api/treatment-plans", treatmentPlanRouter);
+app.use("/api/procedure-catalog", procedureCatalogRouter);
+app.use("/api/recalls", recallsRouter);
 
 // ─── Static file serving for uploads ────────────────────────────────
 

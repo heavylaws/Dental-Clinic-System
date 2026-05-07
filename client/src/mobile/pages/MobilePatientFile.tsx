@@ -77,13 +77,13 @@ export default function MobilePatientFile({ user }: MobilePatientFileProps) {
 
   const sections: { key: typeof activeSection; label: string; count?: number }[] = [
     { key: "visits", label: "📅 Visits", count: visitHistory.length },
-    { key: "diagnostics", label: "🏥 Dx" },
+    { key: "diagnostics", label: "🦷 Findings" },
     { key: "medications", label: "💊 Rx" },
     { key: "photos", label: "📸 Photos" },
   ];
 
-  const allDiagnoses = visitHistory.flatMap((v: any) =>
-    (v.diagnoses || []).map((d: any) => ({ ...d, date: v.startedAt }))
+  const allFindings = visitHistory.flatMap((v: any) =>
+    (v.dentalFindings || []).map((d: any) => ({ ...d, date: v.startedAt }))
   ).sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   const allMedications = visitHistory.flatMap((v: any) =>
@@ -96,7 +96,7 @@ export default function MobilePatientFile({ user }: MobilePatientFileProps) {
 
     let content = "";
     const header = `<div style="text-align:center;margin-bottom:20px;border-bottom:2px solid #333;padding-bottom:10px">
-      <h1 style="margin:0;font-size:22px">DermClinic</h1>
+      <h1 style="margin:0;font-size:22px">DentalClinic</h1>
       <p style="margin:4px 0;color:#666">Patient: <b>${patient.firstName} ${patient.lastName}</b> | File: #${patient.fileNumber}</p>
       <p style="margin:0;color:#666;font-size:12px">Visit #${visit.visitNumber} — ${new Date(visit.startedAt).toLocaleDateString()}</p></div>`;
 
@@ -112,7 +112,7 @@ export default function MobilePatientFile({ user }: MobilePatientFileProps) {
       content = `<h2>Clinical Notes</h2>
         ${visit.chiefComplaint ? `<p><b>Chief Complaint:</b> ${visit.chiefComplaint}</p>` : ""}
         ${visit.clinicalNotes ? `<p><b>Notes:</b> ${visit.clinicalNotes}</p>` : ""}
-        ${(visit.diagnoses || []).length > 0 ? `<p><b>Diagnoses:</b> ${visit.diagnoses.map((d: any) => d.name).join(", ")}</p>` : ""}`;
+        ${(visit.dentalFindings || []).length > 0 ? `<p><b>Diagnoses:</b> ${visit.dentalFindings.map((d: any) => d.name).join(", ")}</p>` : ""}`;
     }
 
     printWindow.document.write(`<!DOCTYPE html><html><head><title>Print</title>
@@ -230,7 +230,7 @@ export default function MobilePatientFile({ user }: MobilePatientFileProps) {
                     </div>
                     {visit.chiefComplaint && <p style={{ fontSize: "0.85rem", color: "#94a3b8", margin: "0 0 6px" }}>{visit.chiefComplaint}</p>}
                     <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
-                      {visit.diagnoses?.map((d: any) => (
+                      {visit.dentalFindings?.map((d: any) => (
                         <span key={d.id} style={{ background: "rgba(59,138,244,0.12)", color: "#60a5fa", padding: "3px 10px", borderRadius: "20px", fontSize: "0.7rem", fontWeight: 700, border: "1px solid rgba(59,138,244,0.15)" }}>{d.name}</span>
                       ))}
                       {visit.prescriptions?.map((rx: any) => (
@@ -239,7 +239,7 @@ export default function MobilePatientFile({ user }: MobilePatientFileProps) {
                       {visit.labOrders?.map((lab: any) => (
                         <span key={lab.id} style={{ background: "rgba(251,191,36,0.12)", color: "#fbbf24", padding: "3px 10px", borderRadius: "20px", fontSize: "0.7rem", fontWeight: 700, border: "1px solid rgba(251,191,36,0.15)" }}>{lab.testName}</span>
                       ))}
-                      {visit.procedures?.map((proc: any) => (
+                      {visit.dentalProcedures?.map((proc: any) => (
                         <span key={proc.id} style={{ background: "rgba(167,139,250,0.12)", color: "#a78bfa", padding: "3px 10px", borderRadius: "20px", fontSize: "0.7rem", fontWeight: 700, border: "1px solid rgba(167,139,250,0.15)" }}>{proc.procedureName}</span>
                       ))}
                     </div>
@@ -282,9 +282,9 @@ export default function MobilePatientFile({ user }: MobilePatientFileProps) {
         {/* Diagnostics */}
         {activeSection === "diagnostics" && (
           <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-            {allDiagnoses.length === 0 ? (
-              <p style={{ textAlign: "center", color: "#475569", padding: "40px" }}>No diagnostics recorded</p>
-            ) : allDiagnoses.map((d: any, i: number) => (
+            {allFindings.length === 0 ? (
+              <p style={{ textAlign: "center", color: "#475569", padding: "40px" }}>No findings recorded</p>
+            ) : allFindings.map((d: any, i: number) => (
               <div key={`${d.id}-${i}`} className="mobile-card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span style={{ fontWeight: 600, color: "#e2e8f0" }}>{d.name}</span>
                 <span style={{ fontSize: "0.76rem", color: "#475569" }}>

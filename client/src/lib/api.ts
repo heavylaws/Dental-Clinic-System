@@ -84,15 +84,15 @@ export const api = {
                 method: "PATCH",
                 body: JSON.stringify(data),
             }),
-        addDiagnosis: (visitId: string, data: any) =>
-            request<any>(`/visits/${visitId}/diagnoses`, {
+        addFinding: (visitId: string, data: any) =>
+            request<any>(`/visits/${visitId}/findings`, {
                 method: "POST",
                 body: JSON.stringify(data),
             }),
-        deleteDiagnosis: (id: string) =>
-            request(`/visits/diagnoses/${id}`, { method: "DELETE" }),
-        updateDiagnosis: (id: string, data: { name: string }) =>
-            request<any>(`/visits/diagnoses/${id}`, {
+        deleteFinding: (id: string) =>
+            request(`/visits/findings/${id}`, { method: "DELETE" }),
+        updateFinding: (id: string, data: any) =>
+            request<any>(`/visits/findings/${id}`, {
                 method: "PATCH",
                 body: JSON.stringify(data),
             }),
@@ -117,6 +117,47 @@ export const api = {
             }),
         deleteProcedure: (id: string) =>
             request(`/visits/procedures/${id}`, { method: "DELETE" }),
+    },
+
+    // ─── Dental Charts ────────────────────────────────────────────────
+
+    dentalCharts: {
+        forPatient: (patientId: string) => request<any[]>(`/dental-charts/patient/${patientId}`),
+        activeForPatient: (patientId: string) => request<any>(`/dental-charts/patient/${patientId}/active`),
+        updateTooth: (chartId: string, toothCode: string, data: any) =>
+            request<any>(`/dental-charts/${chartId}/tooth/${toothCode}`, {
+                method: "PATCH",
+                body: JSON.stringify(data),
+            }),
+    },
+
+    // ─── Treatment Plans ──────────────────────────────────────────────
+
+    treatmentPlans: {
+        forPatient: (patientId: string) => request<any[]>(`/treatment-plans/patient/${patientId}`),
+        create: (data: any) => request<any>("/treatment-plans", { method: "POST", body: JSON.stringify(data) }),
+        update: (id: string, data: any) => request<any>(`/treatment-plans/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+        delete: (id: string) => request(`/treatment-plans/${id}`, { method: "DELETE" }),
+        addItem: (planId: string, data: any) => request<any>(`/treatment-plans/${planId}/items`, { method: "POST", body: JSON.stringify(data) }),
+        updateItem: (itemId: string, data: any) => request<any>(`/treatment-plans/items/${itemId}`, { method: "PATCH", body: JSON.stringify(data) }),
+        deleteItem: (itemId: string) => request(`/treatment-plans/items/${itemId}`, { method: "DELETE" }),
+    },
+
+    // ─── Procedure Catalog ────────────────────────────────────────────
+
+    procedureCatalog: {
+        list: (category?: string) => request<any[]>(category ? `/procedure-catalog?category=${category}` : "/procedure-catalog"),
+        search: (q: string) => request<any[]>(`/procedure-catalog/search?q=${encodeURIComponent(q)}`),
+        create: (data: any) => request<any>("/procedure-catalog", { method: "POST", body: JSON.stringify(data) }),
+    },
+
+    // ─── Recalls ──────────────────────────────────────────────────────
+
+    recalls: {
+        forPatient: (patientId: string) => request<any[]>(`/recalls/patient/${patientId}`),
+        create: (data: any) => request<any>("/recalls", { method: "POST", body: JSON.stringify(data) }),
+        update: (id: string, data: any) => request<any>(`/recalls/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+        delete: (id: string) => request(`/recalls/${id}`, { method: "DELETE" }),
     },
 
     // ─── Autocomplete ─────────────────────────────────────────────────

@@ -10,7 +10,8 @@ import LabPrint from "../components/LabPrint";
 import ClinicalNotesPrint from "../components/ClinicalNotesPrint";
 import CameraCapture from "../components/CameraCapture";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
-import DiagnosticsTable from "../components/patient/DiagnosticsTable";
+import { DentalChart } from "../components/patient/DentalChart";
+import { TreatmentPlanBuilder } from "../components/patient/TreatmentPlanBuilder";
 import PrescriptionsTable from "../components/patient/PrescriptionsTable";
 import MultiSelectComboBox from "../components/MultiSelectComboBox";
 
@@ -42,6 +43,12 @@ export default function PatientFile({ user }: PatientFileProps) {
     const { data: visitHistory = [], isLoading: visitsLoading } = useQuery({
         queryKey: ["visits", "patient", id],
         queryFn: () => api.visits.forPatient(id!),
+        enabled: !!id,
+    });
+
+    const { data: dentalChart, refetch: refetchChart } = useQuery({
+        queryKey: ["dentalChart", "patient", id],
+        queryFn: () => api.dentalCharts.activeForPatient(id!),
         enabled: !!id,
     });
 
@@ -178,10 +185,16 @@ export default function PatientFile({ user }: PatientFileProps) {
                                             📅 Visits ({visitHistory.length})
                                         </TabsTrigger>
                                         <TabsTrigger
-                                            value="diagnostics"
+                                            value="odontogram"
                                             className="px-4 py-2 rounded-lg data-[state=active]:bg-white data-[state=active]:text-primary-700 data-[state=active]:shadow-sm font-semibold text-gray-500"
                                         >
-                                            🏥 Diagnostics
+                                            🦷 Odontogram
+                                        </TabsTrigger>
+                                        <TabsTrigger
+                                            value="treatment_plans"
+                                            className="px-4 py-2 rounded-lg data-[state=active]:bg-white data-[state=active]:text-primary-700 data-[state=active]:shadow-sm font-semibold text-gray-500"
+                                        >
+                                            📋 Treatment Plans
                                         </TabsTrigger>
                                         <TabsTrigger
                                             value="medications"
@@ -328,10 +341,10 @@ export default function PatientFile({ user }: PatientFileProps) {
                                                             )}
 
                                                             {/* Diagnoses */}
-                                                            {visit.diagnoses?.length > 0 && (
+                                                            {visit.dentalFindings?.length > 0 && (
                                                                 <div className="mb-3">
-                                                                    <span className="font-semibold text-gray-700">🏥 Diagnostic: </span>
-                                                                    {visit.diagnoses.map((d: any) => (
+                                                                    <span className="font-semibold text-gray-700">🦷 Finding: </span>
+                                                                    {visit.dentalFindings.map((d: any) => (
                                                                         <span key={d.id} className="inline-block bg-primary-100 text-primary-700 px-3 py-1 rounded-full text-sm font-semibold mr-2 mb-1">
                                                                             {d.name}
                                                                         </span>
@@ -365,10 +378,10 @@ export default function PatientFile({ user }: PatientFileProps) {
                                                             )}
 
                                                             {/* Procedures */}
-                                                            {visit.procedures?.length > 0 && (
+                                                            {visit.dentalProcedures?.length > 0 && (
                                                                 <div className="mb-3">
                                                                     <span className="font-semibold text-gray-700">⚕️ Procedures: </span>
-                                                                    {visit.procedures.map((proc: any) => (
+                                                                    {visit.dentalProcedures.map((proc: any) => (
                                                                         <span key={proc.id} className="inline-block bg-purple-100 text-purple-700 px-3 py-1 rounded-full text-sm font-semibold mr-2 mb-1">
                                                                             {proc.procedureName}
                                                                         </span>
@@ -397,25 +410,17 @@ export default function PatientFile({ user }: PatientFileProps) {
                                     )}
                                 </TabsContent>
 
-                                <TabsContent value="diagnostics">
-                                    <DiagnosticsTable
-                                        diagnostics={visitHistory.flatMap((v: any) =>
-                                            (v.diagnoses || []).map((d: any) => ({
-                                                ...d,
-                                                visitId: v.id,
-                                                date: v.startedAt
-                                            }))
-                                        ).sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime())}
-                                        onVisitClick={(visitId) => {
-                                            const visit = visitHistory.find((v: any) => v.id === visitId);
-                                            if (visit && ["doctor", "admin"].includes(user.role)) {
-                                                setActiveVisitId(visitId);
-                                                setShowNewVisit(true);
-                                            }
-                                        }}
+                                <TabsContent value="odontogram">
+                                    <DentalChart
+                                        patientId={id!}
+                                        chart={dentalChart}
+                                        onUpdate={() => refetchChart()}
                                     />
                                 </TabsContent>
 
+                                <TabsContent value="treatment_plans">
+                                    <TreatmentPlanBuilder patientId={id!} />
+                                </TabsContent>
                                 <TabsContent value="medications">
                                     <PrescriptionsTable
                                         prescriptions={visitHistory.flatMap((v: any) =>
@@ -558,7 +563,7 @@ function VisitForm({
     const [billingAmount, setBillingAmount] = useState("");
 
     // Item input states
-    const [selectedDiagnoses, setSelectedDiagnoses] = useState<string[]>([]);
+    const [selectedFindings, setSelectedFindings] = useState<string[]>([]);
     const [selectedMedications, setSelectedMedications] = useState<string[]>([]);
     const [medDosage, setMedDosage] = useState("");
     const [medFrequency, setMedFrequency] = useState("");
@@ -576,9 +581,9 @@ function VisitForm({
     const [addedReferrals, setAddedReferrals] = useState<any[]>([]);
 
     // Lists of added items
-    const [addedDiagnoses, setAddedDiagnoses] = useState<any[]>([]);
-    const [editingDiagId, setEditingDiagId] = useState<string | null>(null);
-    const [editingDiagValue, setEditingDiagValue] = useState("");
+    const [addedFindings, setAddedFindings] = useState<any[]>([]);
+    const [editingFindingId, setEditingFindingId] = useState<string | null>(null);
+    const [editingFindingValue, setEditingFindingValue] = useState("");
     const [addedMeds, setAddedMeds] = useState<any[]>([]);
     const [addedLabs, setAddedLabs] = useState<any[]>([]);
     const [addedProcs, setAddedProcs] = useState<any[]>([]);
@@ -595,7 +600,7 @@ function VisitForm({
             setExamination(existingVisit.examination || "");
 
             // Set items if they exist
-            if (existingVisit.diagnoses) setAddedDiagnoses(existingVisit.diagnoses);
+            if (existingVisit.diagnoses) setAddedFindings(existingVisit.diagnoses);
             if (existingVisit.prescriptions) setAddedMeds(existingVisit.prescriptions);
             if (existingVisit.labOrders) setAddedLabs(existingVisit.labOrders);
             if (existingVisit.procedures) setAddedProcs(existingVisit.procedures);
@@ -619,32 +624,32 @@ function VisitForm({
             }),
     });
 
-    const addDiagnosisMutation = useMutation({
+    const addFindingMutation = useMutation({
         mutationFn: async (names: string[]) => {
-            // Only add the ones that aren't already in addedDiagnoses
-            const newNames = names.filter(name => !addedDiagnoses.some(d => d.name === name));
+            // Only add the ones that aren't already in addedFindings
+            const newNames = names.filter(name => !addedFindings.some(d => d.name === name));
             const newDiags = [];
             for (const name of newNames) {
-                const diag = await api.visits.addDiagnosis(visitId, { name });
+                const diag = await api.visits.addFinding(visitId, { name });
                 newDiags.push(diag);
             }
             return newDiags;
         },
         onSuccess: (newDiags) => {
-            setAddedDiagnoses((prev) => [...prev, ...newDiags]);
-            setSelectedDiagnoses([]);
+            setAddedFindings((prev) => [...prev, ...newDiags]);
+            setSelectedFindings([]);
         },
     });
 
-    const updateDiagnosisMutation = useMutation({
+    const updateFindingMutation = useMutation({
         mutationFn: ({ id, name }: { id: string; name: string }) =>
-            api.visits.updateDiagnosis(id, { name }),
+            api.visits.updateFinding(id, { name }),
         onSuccess: (updatedDiag) => {
-            setAddedDiagnoses((prev) =>
+            setAddedFindings((prev) =>
                 prev.map((d) => (d.id === updatedDiag.id ? updatedDiag : d))
             );
-            setEditingDiagId(null);
-            setEditingDiagValue("");
+            setEditingFindingId(null);
+            setEditingFindingValue("");
         },
     });
 
@@ -752,9 +757,9 @@ function VisitForm({
 
     // ─── Delete handlers ──────────────────────────────────────────
 
-    const deleteDiag = async (diagId: string) => {
-        await api.visits.deleteDiagnosis(diagId);
-        setAddedDiagnoses((prev) => prev.filter((d) => d.id !== diagId));
+    const deleteFinding = async (diagId: string) => {
+        await api.visits.deleteFinding(diagId);
+        setAddedFindings((prev) => prev.filter((d) => d.id !== diagId));
     };
 
     const deleteMed = async (rxId: string) => {
@@ -842,56 +847,56 @@ function VisitForm({
 
                 {/* ─── Diagnoses ─── */}
                 <div>
-                    <label className="block text-lg font-bold text-gray-700 mb-2">🏥 Diagnostic</label>
+                    <label className="block text-lg font-bold text-gray-700 mb-2">🦷 Finding</label>
                     <div className="flex gap-3">
                         <div className="flex-1">
                             <MultiSelectComboBox
-                                category="diagnosis"
-                                selectedItems={selectedDiagnoses}
-                                onChange={setSelectedDiagnoses}
-                                placeholder="Select diagnosis..."
+                                category="dental_finding"
+                                selectedItems={selectedFindings}
+                                onChange={setSelectedFindings}
+                                placeholder="Select finding..."
                             />
                         </div>
                         <button
-                            onClick={() => selectedDiagnoses.length > 0 && addDiagnosisMutation.mutate(selectedDiagnoses)}
-                            disabled={selectedDiagnoses.length === 0}
+                            onClick={() => selectedFindings.length > 0 && addFindingMutation.mutate(selectedFindings)}
+                            disabled={selectedFindings.length === 0}
                             className="px-5 py-3 bg-primary-600 text-white rounded-lg font-bold hover:bg-primary-700 transition disabled:opacity-30"
                         >
                             + Add
                         </button>
                     </div>
-                    {addedDiagnoses.length > 0 && (
+                    {addedFindings.length > 0 && (
                         <div className="flex flex-wrap gap-2 mt-3">
-                            {addedDiagnoses.map((d) => (
+                            {addedFindings.map((d) => (
                                 <span
                                     key={d.id}
-                                    className={`inline-flex items-center gap-2 bg-primary-100 text-primary-700 px-4 py-2 rounded-full text-lg font-semibold ${editingDiagId === d.id ? "ring-2 ring-primary-500 bg-white" : ""
+                                    className={`inline-flex items-center gap-2 bg-primary-100 text-primary-700 px-4 py-2 rounded-full text-lg font-semibold ${editingFindingId === d.id ? "ring-2 ring-primary-500 bg-white" : ""
                                         }`}
                                 >
-                                    {editingDiagId === d.id ? (
+                                    {editingFindingId === d.id ? (
                                         <div className="flex items-center gap-2">
                                             <input
                                                 type="text"
                                                 autoFocus
-                                                value={editingDiagValue}
-                                                onChange={(e) => setEditingDiagValue(e.target.value)}
+                                                value={editingFindingValue}
+                                                onChange={(e) => setEditingFindingValue(e.target.value)}
                                                 onKeyDown={(e) => {
                                                     if (e.key === "Enter") {
-                                                        updateDiagnosisMutation.mutate({ id: d.id, name: editingDiagValue });
+                                                        updateFindingMutation.mutate({ id: d.id, name: editingFindingValue });
                                                     } else if (e.key === "Escape") {
-                                                        setEditingDiagId(null);
+                                                        setEditingFindingId(null);
                                                     }
                                                 }}
                                                 className="bg-transparent border-none outline-none text-primary-900 w-32 md:w-48"
                                             />
                                             <button
-                                                onClick={() => updateDiagnosisMutation.mutate({ id: d.id, name: editingDiagValue })}
+                                                onClick={() => updateFindingMutation.mutate({ id: d.id, name: editingFindingValue })}
                                                 className="text-green-600 hover:text-green-700"
                                             >
                                                 <Check size={18} />
                                             </button>
                                             <button
-                                                onClick={() => setEditingDiagId(null)}
+                                                onClick={() => setEditingFindingId(null)}
                                                 className="text-gray-400 hover:text-gray-600"
                                             >
                                                 <X size={18} />
@@ -903,8 +908,8 @@ function VisitForm({
                                             <div className="flex items-center gap-1.5 ml-1">
                                                 <button
                                                     onClick={() => {
-                                                        setEditingDiagId(d.id);
-                                                        setEditingDiagValue(d.name);
+                                                        setEditingFindingId(d.id);
+                                                        setEditingFindingValue(d.name);
                                                     }}
                                                     className="text-primary-400 hover:text-primary-600 transition"
                                                     title="Edit name"
@@ -912,7 +917,7 @@ function VisitForm({
                                                     <Pencil size={16} />
                                                 </button>
                                                 <button
-                                                    onClick={() => deleteDiag(d.id)}
+                                                    onClick={() => deleteFinding(d.id)}
                                                     className="text-primary-400 hover:text-danger-500 transition"
                                                     title="Delete"
                                                 >
@@ -1224,7 +1229,7 @@ function VisitForm({
                     <div className="flex gap-3">
                         {addedMeds.length > 0 && (
                             <button
-                                onClick={() => onPrintRx({ ...existingVisit, prescriptions: addedMeds, diagnoses: addedDiagnoses })}
+                                onClick={() => onPrintRx({ ...existingVisit, prescriptions: addedMeds, diagnoses: addedFindings })}
                                 className="px-5 py-3 bg-purple-100 text-purple-700 font-bold rounded-xl hover:bg-purple-200 transition flex items-center gap-2"
                             >
                                 <Pill size={20} />
@@ -1233,7 +1238,7 @@ function VisitForm({
                         )}
                         {addedLabs.length > 0 && (
                             <button
-                                onClick={() => onPrintLab({ ...existingVisit, labOrders: addedLabs, diagnoses: addedDiagnoses })}
+                                onClick={() => onPrintLab({ ...existingVisit, labOrders: addedLabs, diagnoses: addedFindings })}
                                 className="px-5 py-3 bg-cyan-100 text-cyan-700 font-bold rounded-xl hover:bg-cyan-200 transition flex items-center gap-2"
                             >
                                 <Beaker size={20} />
@@ -1242,7 +1247,7 @@ function VisitForm({
                         )}
                         {(notes || complaint) && (
                             <button
-                                onClick={() => onPrintNotes({ ...existingVisit, chiefComplaint: complaint, clinicalNotes: notes, diagnoses: addedDiagnoses })}
+                                onClick={() => onPrintNotes({ ...existingVisit, chiefComplaint: complaint, clinicalNotes: notes, diagnoses: addedFindings })}
                                 className="px-5 py-3 bg-emerald-100 text-emerald-700 font-bold rounded-xl hover:bg-emerald-200 transition flex items-center gap-2"
                             >
                                 <Printer size={20} />

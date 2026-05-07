@@ -3,7 +3,7 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { db } from "../../db/index.js";
-import { patientImages } from "../../db/schema.js";
+import { dentalMedia } from "../../db/schema.js";
 import { eq, desc } from "drizzle-orm";
 import { requireAuth } from "../auth/index.js";
 
@@ -53,7 +53,7 @@ router.post("/:patientId/upload", upload.single("image"), async (req, res) => {
         const { visitId, caption } = req.body;
 
         const [image] = await db
-            .insert(patientImages)
+            .insert(dentalMedia)
             .values({
                 patientId: patId,
                 visitId: visitId || null,
@@ -75,9 +75,9 @@ router.get("/:patientId", async (req, res) => {
         const patId = req.params.patientId as string;
         const images = await db
             .select()
-            .from(patientImages)
-            .where(eq(patientImages.patientId, patId))
-            .orderBy(desc(patientImages.capturedAt));
+            .from(dentalMedia)
+            .where(eq(dentalMedia.patientId, patId))
+            .orderBy(desc(dentalMedia.capturedAt));
         res.json(images);
     } catch (error: any) {
         res.status(500).json({ error: error.message });
@@ -91,8 +91,8 @@ router.delete("/:id", async (req, res) => {
         const imgId = req.params.id as string;
         const [image] = await db
             .select()
-            .from(patientImages)
-            .where(eq(patientImages.id, imgId))
+            .from(dentalMedia)
+            .where(eq(dentalMedia.id, imgId))
             .limit(1);
 
         if (image) {
@@ -101,7 +101,7 @@ router.delete("/:id", async (req, res) => {
             if (fs.existsSync(fullPath)) {
                 fs.unlinkSync(fullPath);
             }
-            await db.delete(patientImages).where(eq(patientImages.id, imgId));
+            await db.delete(dentalMedia).where(eq(dentalMedia.id, imgId));
         }
 
         res.json({ success: true });

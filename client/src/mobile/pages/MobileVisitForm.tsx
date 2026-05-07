@@ -5,7 +5,7 @@ import { api } from "../../lib/api";
 import MobileHeader from "../components/MobileHeader";
 import { useHapticFeedback } from "../hooks/useHapticFeedback";
 
-const STEPS = ["Complaint", "Notes", "Diagnosis", "Rx", "Labs", "Procedures", "Follow-up", "Review"];
+const STEPS = ["Complaint", "Notes", "Findings", "Rx", "Labs", "Procedures", "Follow-up", "Review"];
 
 export default function MobileVisitForm({ user }: { user: any }) {
   const { visitId } = useParams<{ visitId: string }>();
@@ -19,8 +19,8 @@ export default function MobileVisitForm({ user }: { user: any }) {
   // Form state
   const [complaint, setComplaint] = useState("");
   const [notes, setNotes] = useState("");
-  const [diagInput, setDiagInput] = useState("");
-  const [addedDiagnoses, setAddedDiagnoses] = useState<any[]>([]);
+  const [findingInput, setFindingInput] = useState("");
+  const [addedFindings, setAddedFindings] = useState<any[]>([]);
   const [medInput, setMedInput] = useState("");
   const [medDosage, setMedDosage] = useState("");
   const [medFrequency, setMedFrequency] = useState("");
@@ -40,10 +40,10 @@ export default function MobileVisitForm({ user }: { user: any }) {
   const [billingAmount, setBillingAmount] = useState("");
 
   // Autocomplete
-  const { data: diagSuggestions = [] } = useQuery({
-    queryKey: ["autocomplete", "diagnosis", diagInput],
-    queryFn: () => api.autocomplete.search("diagnosis", diagInput),
-    enabled: diagInput.length >= 2,
+  const { data: findingSuggestions = [] } = useQuery({
+    queryKey: ["autocomplete", "dental_finding", findingInput],
+    queryFn: () => api.autocomplete.search("dental_finding", findingInput),
+    enabled: findingInput.length >= 2,
   });
   const { data: medSuggestions = [] } = useQuery({
     queryKey: ["autocomplete", "medication", medInput],
@@ -67,10 +67,10 @@ export default function MobileVisitForm({ user }: { user: any }) {
     if (existingVisit) {
       setComplaint(existingVisit.chiefComplaint || "");
       setNotes(existingVisit.clinicalNotes || "");
-      if (existingVisit.diagnoses) setAddedDiagnoses(existingVisit.diagnoses);
+      if (existingVisit.dentalFindings) setAddedFindings(existingVisit.dentalFindings);
       if (existingVisit.prescriptions) setAddedMeds(existingVisit.prescriptions);
       if (existingVisit.labOrders) setAddedLabs(existingVisit.labOrders);
-      if (existingVisit.procedures) setAddedProcs(existingVisit.procedures);
+      if (existingVisit.dentalProcedures) setAddedProcs(existingVisit.dentalProcedures);
       if (existingVisit.billing) setBillingAmount(existingVisit.billing.totalAmount || "");
     }
   }, [existingVisit]);
@@ -80,9 +80,9 @@ export default function MobileVisitForm({ user }: { user: any }) {
     mutationFn: () => api.visits.updateNotes(visitId!, { chiefComplaint: complaint, clinicalNotes: notes }),
   });
 
-  const addDiag = useMutation({
-    mutationFn: (name: string) => api.visits.addDiagnosis(visitId!, { name }),
-    onSuccess: (diag) => { setAddedDiagnoses(p => [...p, diag]); setDiagInput(""); haptic.light(); },
+  const addFinding = useMutation({
+    mutationFn: (name: string) => api.visits.addFindingnosis(visitId!, { name }),
+    onSuccess: (diag) => { setAddedFindings(p => [...p, diag]); setFindingInput(""); haptic.light(); },
   });
 
   const addMed = useMutation({
@@ -120,7 +120,7 @@ export default function MobileVisitForm({ user }: { user: any }) {
   });
 
   const deleteItem = async (type: string, id: string) => {
-    if (type === "diag") { await api.visits.deleteDiagnosis(id); setAddedDiagnoses(p => p.filter(x => x.id !== id)); }
+    if (type === "diag") { await api.visits.deleteFindingnosis(id); setAddedFindings(p => p.filter(x => x.id !== id)); }
     if (type === "med") { await api.visits.deletePrescription(id); setAddedMeds(p => p.filter(x => x.id !== id)); }
     if (type === "lab") { await api.visits.deleteLabOrder(id); setAddedLabs(p => p.filter(x => x.id !== id)); }
     if (type === "proc") { await api.visits.deleteProcedure(id); setAddedProcs(p => p.filter(x => x.id !== id)); }
@@ -196,25 +196,25 @@ export default function MobileVisitForm({ user }: { user: any }) {
             placeholder="Clinical notes, examination findings..." autoFocus />
         )}
 
-        {/* Step 2: Diagnoses */}
+        {/* Step 2: Findings */}
         {step === 2 && (
           <div>
             <div style={{ display: "flex", gap: "8px", marginBottom: "12px" }}>
-              <input value={diagInput} onChange={e => setDiagInput(e.target.value)}
-                className="mobile-input" placeholder="Search diagnosis..." style={{ flex: 1 }} autoFocus />
-              <button onClick={() => diagInput && addDiag.mutate(diagInput)} disabled={!diagInput}
+              <input value={findingInput} onChange={e => setFindingInput(e.target.value)}
+                className="mobile-input" placeholder="Search finding..." style={{ flex: 1 }} autoFocus />
+              <button onClick={() => findingInput && addFinding.mutate(findingInput)} disabled={!findingInput}
                 className="mobile-btn mobile-btn-primary"
-                style={{ width: "auto", padding: "12px 20px", opacity: diagInput ? 1 : 0.3 }}>+</button>
+                style={{ width: "auto", padding: "12px 20px", opacity: findingInput ? 1 : 0.3 }}>+</button>
             </div>
-            {diagSuggestions.length > 0 && diagInput && (
+            {findingSuggestions.length > 0 && findingInput && (
               <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "14px" }}>
-                {diagSuggestions.slice(0, 8).map((s: any) => (
-                  <button key={s.id || s.term} onClick={() => addDiag.mutate(s.term)}
+                {findingSuggestions.slice(0, 8).map((s: any) => (
+                  <button key={s.id || s.term} onClick={() => addFinding.mutate(s.term)}
                     className="touch-button" style={chipStyle("#60a5fa")}>{s.term}</button>
                 ))}
               </div>
             )}
-            {addedDiagnoses.map(d => (
+            {addedFindings.map(d => (
               <div key={d.id} className="mobile-card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", marginBottom: "6px" }}>
                 <span style={{ fontWeight: 600, color: "#e2e8f0" }}>{d.name}</span>
                 <button onClick={() => deleteItem("diag", d.id)} style={delBtnStyle}>✕</button>
@@ -379,10 +379,10 @@ export default function MobileVisitForm({ user }: { user: any }) {
               <div className="mobile-card"><p className="mobile-section-label">Complaint</p>
                 <p style={{ margin: 0, color: "#e2e8f0", fontSize: "0.9rem" }}>{complaint}</p></div>
             )}
-            {addedDiagnoses.length > 0 && (
-              <div className="mobile-card"><p className="mobile-section-label">Diagnoses</p>
+            {addedFindings.length > 0 && (
+              <div className="mobile-card"><p className="mobile-section-label">Findings</p>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
-                  {addedDiagnoses.map(d => <span key={d.id} style={chipStyle("#60a5fa")}>{d.name}</span>)}
+                  {addedFindings.map(d => <span key={d.id} style={chipStyle("#60a5fa")}>{d.name}</span>)}
                 </div></div>
             )}
             {addedMeds.length > 0 && (

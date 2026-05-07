@@ -33,14 +33,31 @@ export const insertVisitSchema = z.object({
 
 export type InsertVisit = z.infer<typeof insertVisitSchema>;
 
-// ─── Diagnosis ──────────────────────────────────────────────────────
+// ─── Dental Findings ────────────────────────────────────────────────
 
-export const insertDiagnosisSchema = z.object({
-    visitId: z.string().uuid(),
-    name: z.string().min(1),
-    icdCode: z.string().optional(),
-    description: z.string().optional(),
+export const insertDentalFindingSchema = z.object({
+    visitId: z.string().uuid().optional(),
+    chartId: z.string().uuid().optional(),
+    toothCode: z.string().optional(),
+    surfaces: z.array(z.string()).optional(),
+    findingType: z.string().min(1),
     severity: z.string().optional(),
+    description: z.string().optional(),
+    status: z.string().default("active"),
+});
+
+// ─── Dental Procedures ──────────────────────────────────────────────
+
+export const insertDentalProcedureSchema = z.object({
+    visitId: z.string().uuid(),
+    treatmentPlanItemId: z.string().uuid().optional(),
+    toothCode: z.string().optional(),
+    surfaces: z.array(z.string()).optional(),
+    procedureCode: z.string().optional(),
+    procedureName: z.string().min(1),
+    category: z.string().optional(),
+    notes: z.string().optional(),
+    cost: z.string().optional(),
 });
 
 // ─── Prescription ───────────────────────────────────────────────────
@@ -60,15 +77,6 @@ export const insertPrescriptionSchema = z.object({
 export const insertLabOrderSchema = z.object({
     visitId: z.string().uuid(),
     testName: z.string().min(1),
-});
-
-// ─── Procedure ──────────────────────────────────────────────────────
-
-export const insertProcedureSchema = z.object({
-    visitId: z.string().uuid(),
-    procedureName: z.string().min(1),
-    details: z.string().optional(),
-    cost: z.string().optional(),
 });
 
 // ─── Billing ────────────────────────────────────────────────────────
@@ -98,7 +106,7 @@ export const loginSchema = z.object({
 // ─── Autocomplete ───────────────────────────────────────────────────
 
 export const autocompleteQuerySchema = z.object({
-    category: z.enum(["diagnosis", "medication", "lab_test", "procedure", "complaint"]),
+    category: z.enum(["medication", "lab_test", "complaint", "dental_finding", "dental_procedure"]),
     query: z.string().min(1),
     limit: z.number().int().min(1).max(20).default(8),
 });
@@ -145,3 +153,4 @@ export const insertReferralSchema = z.object({
     status: z.enum(["pending", "accepted", "completed"]).default("pending"),
     notes: z.string().optional(),
 });
+

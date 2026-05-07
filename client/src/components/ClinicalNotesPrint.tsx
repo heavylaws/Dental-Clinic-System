@@ -18,7 +18,7 @@ export default function ClinicalNotesPrint({ patient, visit, diagnoses, onClose 
         staleTime: 60000,
     });
 
-    const clinicName = settings?.clinic_name || "DermClinic";
+    const clinicName = settings?.clinic_name || "DentalClinic";
     const clinicSubtitle = settings?.clinic_subtitle || "Dermatology & Skin Care Center";
     const clinicPhone = settings?.clinic_phone || "";
 

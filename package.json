@@ -1,5 +1,5 @@
 {
-  "name": "dermclinic",
+  "name": "dentalclinic",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -15,6 +15,7 @@
     "db:reset": "tsx scripts/reset-db.ts",
     "db:restore": "tsx scripts/migrate.ts",
     "seed:terms": "tsx scripts/seed-medical-terms.ts",
+    "seed:dental": "tsx scripts/seed-dental-demo-data.ts",
     "test": "vitest"
   },
   "dependencies": {
