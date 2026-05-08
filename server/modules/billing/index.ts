@@ -1,166 +1,96 @@
-import { Router } from "express";
-import { db } from "../../db/index.js";
-import { billings, payments, visits, patients } from "../../db/schema.js";
-import { eq, desc, sql, and, gte, lte } from "drizzle-orm";
-import { insertBillingSchema, insertPaymentSchema } from "../../../shared/types.js";
+﻿import { Router } from "express";
 import { requireAuth } from "../auth/index.js";
-import { broadcast } from "../../ws.js";
+import { demoBillings, getLiveDemoBillings, getLiveDemoVisits, demoVisits, demoPatients } from "../../demo-store.js";
+import { v4 as uuidv4 } from "uuid";
 
 const router = Router();
 router.use(requireAuth);
 
-// ─── Get billing for a visit ────────────────────────────────────────
+// Get billing for a visit
+router.get("/visit/:visitId", (req, res) => {
+    const billing = demoBillings.find((b) => b.visitId === req.params.visitId);
+    res.json(billing || null);
+});
 
-router.get("/visit/:visitId", async (req, res) => {
-    try {
-        const billing = await db.query.billings.findFirst({
-            where: eq(billings.visitId, req.params.visitId),
-            with: { payments: true },
+// Billing summary (filtered by date)
+router.get("/", (req, res) => {
+    const { startDate, endDate } = req.query;
+    let start: Date, end: Date;
+    if (startDate) {
+        const [y, m, d] = (startDate as string).split("-").map(Number);
+        start = new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0));
+    } else {
+        const t = new Date();
+        start = new Date(Date.UTC(t.getFullYear(), t.getMonth(), t.getDate(), 0, 0, 0, 0));
+    }
+    if (endDate) {
+        const [y, m, d] = (endDate as string).split("-").map(Number);
+        end = new Date(Date.UTC(y, m - 1, d, 23, 59, 59, 999));
+    } else {
+        const t = new Date();
+        end = new Date(Date.UTC(t.getFullYear(), t.getMonth(), t.getDate(), 23, 59, 59, 999));
+    }
+
+    const results = getLiveDemoBillings()
+        .filter((b) => {
+            const d = new Date(b.createdAt);
+            return d >= start && d <= end;
+        })
+        .map((b) => {
+            const visit = getLiveDemoVisits().find((v) => v.id === b.visitId);
+            const patient = visit ? demoPatients.find((p) => p.id === visit.patientId) : null;
+            return {
+                ...b,
+                patientFirstName: patient ? patient.firstName : "",
+                patientLastName: patient ? patient.lastName : "",
+            };
         });
-        res.json(billing || null);
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
+
+    const totalBilled = results.reduce((sum, b) => sum + parseFloat(b.totalAmount || "0"), 0);
+    const totalPaid = results.reduce((sum, b) => sum + parseFloat(b.paidAmount || "0"), 0);
+
+    res.json({ billings: results, totalBilled, totalPaid, outstanding: totalBilled - totalPaid });
 });
 
-// ─── Billing summary (default: today, or filtered by date) ──────────
-
-router.get("/", async (req, res) => {
-    try {
-        const { startDate, endDate } = req.query;
-        let start = new Date();
-        let end = new Date();
-
-        if (startDate) {
-            // Parse as local date explicitly
-            const [year, month, day] = (startDate as string).split("-").map(Number);
-            start = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
-        } else {
-            const tempStart = new Date();
-            start = new Date(Date.UTC(tempStart.getFullYear(), tempStart.getMonth(), tempStart.getDate(), 0, 0, 0, 0));
-        }
-
-        if (endDate) {
-            const [year, month, day] = (endDate as string).split("-").map(Number);
-            end = new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999));
-        } else {
-            const tempEnd = new Date();
-            end = new Date(Date.UTC(tempEnd.getFullYear(), tempEnd.getMonth(), tempEnd.getDate(), 23, 59, 59, 999));
-        }
-
-        const results = await db
-            .select({
-                billing: billings,
-                patientFirstName: patients.firstName,
-                patientLastName: patients.lastName,
-            })
-            .from(billings)
-            .innerJoin(visits, eq(billings.visitId, visits.id))
-            .innerJoin(patients, eq(visits.patientId, patients.id))
-            .where(
-                and(
-                    gte(billings.createdAt, start),
-                    lte(billings.createdAt, end)
-                )
-            )
-            .orderBy(desc(billings.createdAt));
-
-        const items = results.map((r) => ({
-            ...r.billing,
-            patientName: `${r.patientFirstName} ${r.patientLastName}`,
-        }));
-
-        // Calculate totals
-        const totalBilled = items.reduce((sum, b) => sum + Number(b.totalAmount), 0);
-        const totalPaid = items.reduce((sum, b) => sum + Number(b.paidAmount), 0);
-
-        res.json({ items, totalBilled, totalPaid, outstanding: totalBilled - totalPaid });
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
+// Create billing
+router.post("/", (req, res) => {
+    const billing = {
+        id: uuidv4(),
+        currency: "USD",
+        status: "unpaid",
+        createdAt: new Date().toISOString(),
+        payments: [],
+        ...req.body,
+    };
+    demoBillings.push(billing);
+    // Update visit status
+    const vIdx = demoVisits.findIndex((v) => v.id === billing.visitId);
+    if (vIdx !== -1) demoVisits[vIdx].status = "billed";
+    res.status(201).json(billing);
 });
 
-// ─── Create or update billing ───────────────────────────────────────
-
-router.post("/", async (req, res) => {
-    try {
-        const data = insertBillingSchema.parse(req.body);
-
-        // Check if billing already exists for this visit
-        const [existing] = await db
-            .select()
-            .from(billings)
-            .where(eq(billings.visitId, data.visitId))
-            .limit(1);
-
-        const isZeroBill = Number(data.totalAmount) === 0;
-
-        let billing;
-        if (existing) {
-            [billing] = await db
-                .update(billings)
-                .set({
-                    totalAmount: data.totalAmount,
-                    currency: data.currency,
-                    notes: data.notes,
-                    status: isZeroBill ? "paid" : existing.status,
-                    paidAmount: isZeroBill ? data.totalAmount : existing.paidAmount,
-                })
-                .where(eq(billings.id, existing.id))
-                .returning();
-        } else {
-            [billing] = await db.insert(billings).values({
-                ...data,
-                status: isZeroBill ? "paid" : "unpaid",
-                paidAmount: isZeroBill ? data.totalAmount : "0",
-            }).returning();
-        }
-
-        broadcast("billing:update", billing);
-        res.status(201).json(billing);
-    } catch (error: any) {
-        if (error.name === "ZodError") return res.status(400).json({ error: error.errors });
-        res.status(500).json({ error: error.message });
-    }
+// Update billing
+router.put("/:id", (req, res) => {
+    const idx = demoBillings.findIndex((b) => b.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ error: "Billing not found" });
+    demoBillings[idx] = { ...demoBillings[idx], ...req.body };
+    res.json(demoBillings[idx]);
 });
 
-// ─── Record payment ─────────────────────────────────────────────────
-
-router.post("/payments", async (req, res) => {
-    try {
-        const data = insertPaymentSchema.parse(req.body);
-        const [payment] = await db.insert(payments).values(data).returning();
-
-        // Update billing paid amount
-        const [billing] = await db
-            .select()
-            .from(billings)
-            .where(eq(billings.id, data.billingId))
-            .limit(1);
-
-        if (billing) {
-            const allPayments = await db
-                .select()
-                .from(payments)
-                .where(eq(payments.billingId, billing.id));
-
-            const totalPaid = allPayments.reduce((sum, p) => sum + Number(p.amount), 0);
-
-            await db
-                .update(billings)
-                .set({
-                    paidAmount: totalPaid.toString(),
-                    status: totalPaid >= Number(billing.totalAmount) ? "paid" : "partial",
-                })
-                .where(eq(billings.id, billing.id));
-        }
-
-        broadcast("billing:update", { billingId: data.billingId });
-        res.status(201).json(payment);
-    } catch (error: any) {
-        if (error.name === "ZodError") return res.status(400).json({ error: error.errors });
-        res.status(500).json({ error: error.message });
-    }
+// Add payment
+router.post("/:id/payments", (req, res) => {
+    const billing = demoBillings.find((b) => b.id === req.params.id);
+    if (!billing) return res.status(404).json({ error: "Billing not found" });
+    const payment = { id: uuidv4(), billingId: req.params.id, method: "cash", paidAt: new Date().toISOString(), ...req.body };
+    billing.payments.push(payment);
+    // Recalculate paid amount and status
+    const totalPaid = billing.payments.reduce((s: number, p: any) => s + parseFloat(p.amount || "0"), 0);
+    billing.paidAmount = String(totalPaid);
+    const total = parseFloat(billing.totalAmount || "0");
+    if (totalPaid >= total) billing.status = "paid";
+    else if (totalPaid > 0) billing.status = "partial";
+    else billing.status = "unpaid";
+    res.status(201).json(payment);
 });
 
 export { router as billingRouter };

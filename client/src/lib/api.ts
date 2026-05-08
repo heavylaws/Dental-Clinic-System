@@ -21,6 +21,10 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 // ─── Auth ───────────────────────────────────────────────────────────
 
 export const api = {
+    public: {
+        branding: () => request<{ clinicName: string; clinicIcon: string; clinicSubtitle: string }>("/public/branding"),
+    },
+
     auth: {
         login: (username: string, password: string) =>
             request("/auth/login", {
@@ -108,6 +112,11 @@ export const api = {
                 method: "POST",
                 body: JSON.stringify(data),
             }),
+        updateLabOrder: (visitId: string, labId: string, data: any) =>
+            request<any>(`/visits/${visitId}/lab-orders/${labId}`, {
+                method: "PATCH",
+                body: JSON.stringify(data),
+            }),
         deleteLabOrder: (id: string) =>
             request(`/visits/lab-orders/${id}`, { method: "DELETE" }),
         addProcedure: (visitId: string, data: any) =>
@@ -154,6 +163,7 @@ export const api = {
     // ─── Recalls ──────────────────────────────────────────────────────
 
     recalls: {
+        list: () => request<any[]>("/recalls"),
         forPatient: (patientId: string) => request<any[]>(`/recalls/patient/${patientId}`),
         create: (data: any) => request<any>("/recalls", { method: "POST", body: JSON.stringify(data) }),
         update: (id: string, data: any) => request<any>(`/recalls/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
@@ -187,7 +197,33 @@ export const api = {
             request<any>("/billing/payments", { method: "POST", body: JSON.stringify(data) }),
     },
 
-    // ─── Reports ──────────────────────────────────────────────────────
+    // ─── Audit Log ────────────────────────────────────────────────────
+
+    auditLog: {
+        list: (limit = 100, resource?: string) => {
+            const params = new URLSearchParams({ limit: limit.toString() });
+            if (resource) params.set("resource", resource);
+            return request<any[]>(`/audit-log?${params}`);
+        },
+    },
+
+    // ─── WhatsApp ─────────────────────────────────────────────────────
+
+    whatsapp: {
+        status: () => request<any>("/whatsapp/status"),
+        connect: () => request<any>("/whatsapp/connect", { method: "POST" }),
+        disconnect: () => request<any>("/whatsapp/disconnect", { method: "POST" }),
+        send: (phone: string, message: string) =>
+            request<any>("/whatsapp/send", { method: "POST", body: JSON.stringify({ phone, message }) }),
+        sendAppointmentReminder: (data: {
+            patientName: string; phone: string; doctorName?: string;
+            date: string; time: string; clinicName?: string;
+        }) => request<any>("/whatsapp/send-appointment-reminder", { method: "POST", body: JSON.stringify(data) }),
+        sendRecallReminder: (data: {
+            patientName: string; phone: string; recallType?: string;
+            dueDate: string; clinicName?: string;
+        }) => request<any>("/whatsapp/send-recall-reminder", { method: "POST", body: JSON.stringify(data) }),
+    },
 
     reports: {
         daily: (date?: string) =>
@@ -198,12 +234,18 @@ export const api = {
             if (year) params.set("year", year.toString());
             return request<any>(`/reports/monthly?${params}`);
         },
+        financial: (from?: string, to?: string) => {
+            const params = new URLSearchParams();
+            if (from) params.set("from", from);
+            if (to) params.set("to", to);
+            return request<any>(`/reports/financial?${params}`);
+        },
         topDiagnoses: () => request<any[]>("/reports/top-diagnoses"),
         topMedications: () => request<any[]>("/reports/top-medications"),
         prescriptions: (startDate: string, endDate: string, medication?: string) => {
             const params = new URLSearchParams();
-            params.set("startDate", startDate);
-            params.set("endDate", endDate);
+            params.set("from", startDate);
+            params.set("to", endDate);
             if (medication) params.set("medication", medication);
             return request<any>(`/reports/prescriptions?${params}`);
         },
@@ -212,9 +254,17 @@ export const api = {
     // ─── Appointments ─────────────────────────────────────────────────
 
     appointments: {
-        list: (date: string) => request<any[]>(`/appointments?date=${date}`),
-        range: (from: string, to: string) =>
-            request<any[]>(`/appointments?from=${from}&to=${to}`),
+        list: (date: string, doctorId?: string) => {
+            const params = new URLSearchParams({ date });
+            if (doctorId) params.set("doctorId", doctorId);
+            return request<any[]>(`/appointments?${params}`);
+        },
+        range: (from: string, to: string, doctorId?: string) => {
+            const params = new URLSearchParams({ from, to });
+            if (doctorId) params.set("doctorId", doctorId);
+            return request<any[]>(`/appointments?${params}`);
+        },
+        doctors: () => request<{ id: string; name: string }[]>("/appointments/doctors"),
         forPatient: (patientId: string) =>
             request<any[]>(`/appointments/patient/${patientId}`),
         create: (data: any) =>

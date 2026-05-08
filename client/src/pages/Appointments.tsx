@@ -10,6 +10,7 @@ interface Appointment {
     patientId: string;
     patientName: string;
     patientPhone?: string;
+    doctorId?: string;
     doctorName?: string;
     appointmentDate: string;
     timeSlot: string;
@@ -32,6 +33,12 @@ const STATUS_COLORS: Record<string, string> = {
     completed: "bg-gray-100 text-gray-500 border-gray-200",
 };
 
+// Color-code appointments by doctor
+const DOCTOR_ACCENT: Record<string, string> = {
+    "2": "border-l-4 border-l-blue-500",
+    "4": "border-l-4 border-l-purple-500",
+};
+
 const VIEWS = ["day", "week"] as const;
 type ViewMode = (typeof VIEWS)[number];
 
@@ -43,6 +50,7 @@ export default function Appointments() {
     const [view, setView] = useState<ViewMode>("day");
     const [showDialog, setShowDialog] = useState(false);
     const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
+    const [doctorFilter, setDoctorFilter] = useState<string>("");
 
     // Search state for patient picker
     const [searchQuery, setSearchQuery] = useState("");
@@ -54,6 +62,7 @@ export default function Appointments() {
     const [formDuration, setFormDuration] = useState(30);
     const [formType, setFormType] = useState("consultation");
     const [formNotes, setFormNotes] = useState("");
+    const [formDoctorId, setFormDoctorId] = useState<string>("2");
 
     // Query dates
     const dateStr = format(currentDate, "yyyy-MM-dd");
@@ -61,11 +70,16 @@ export default function Appointments() {
     const weekEnd = format(endOfWeek(currentDate, { weekStartsOn: 1 }), "yyyy-MM-dd");
 
     const { data: appointments = [], isLoading } = useQuery({
-        queryKey: ["appointments", view, view === "day" ? dateStr : weekStart],
+        queryKey: ["appointments", view, view === "day" ? dateStr : weekStart, doctorFilter],
         queryFn: () =>
             view === "day"
-                ? api.appointments.list(dateStr)
-                : api.appointments.range(weekStart, weekEnd),
+                ? api.appointments.list(dateStr, doctorFilter || undefined)
+                : api.appointments.range(weekStart, weekEnd, doctorFilter || undefined),
+    });
+
+    const { data: doctorList = [] } = useQuery({
+        queryKey: ["appointment-doctors"],
+        queryFn: () => api.appointments.doctors(),
     });
 
     const { data: searchResults = [] } = useQuery({
@@ -116,6 +130,7 @@ export default function Appointments() {
         setFormDuration(30);
         setFormType("consultation");
         setFormNotes("");
+        setFormDoctorId(doctorFilter || doctorList[0]?.id || "2");
         setSelectedPatient(null);
         setSearchQuery("");
         setShowDialog(true);
@@ -128,6 +143,7 @@ export default function Appointments() {
         setFormDuration(appt.duration);
         setFormType(appt.type);
         setFormNotes(appt.notes || "");
+        setFormDoctorId(appt.doctorId || doctorFilter || doctorList[0]?.id || "2");
         setSelectedPatient({ id: appt.patientId, firstName: appt.patientName.split(" ")[0], lastName: appt.patientName.split(" ").slice(1).join(" ") });
         setSearchQuery("");
         setShowDialog(true);
@@ -151,6 +167,7 @@ export default function Appointments() {
             duration: formDuration,
             type: formType,
             notes: formNotes || undefined,
+            doctorId: formDoctorId,
         };
 
         if (editingAppointment) {
@@ -162,6 +179,24 @@ export default function Appointments() {
 
     function navigateDate(delta: number) {
         setCurrentDate((d) => addDays(d, view === "week" ? delta * 7 : delta));
+    }
+
+    const waMutation = useMutation({
+        mutationFn: (appt: Appointment) =>
+            api.whatsapp.sendAppointmentReminder({
+                patientName: appt.patientName,
+                phone: appt.patientPhone!,
+                doctorName: appt.doctorName,
+                date: appt.appointmentDate,
+                time: appt.timeSlot,
+            }),
+        onSuccess: () => alert("WhatsApp reminder sent!"),
+        onError: (e: any) => alert("Failed to send WhatsApp: " + (e.message || "Not connected")),
+    });
+
+    function sendWaReminder(appt: Appointment) {
+        if (!appt.patientPhone) { alert("No phone number on file"); return; }
+        waMutation.mutate(appt);
     }
 
     // ─── Week days ──────────────────────────────────────────────────
@@ -229,6 +264,19 @@ export default function Appointments() {
                         ? format(currentDate, "EEEE, MMMM d, yyyy")
                         : `${format(weekDays[0], "MMM d")} – ${format(weekDays[6], "MMM d, yyyy")}`}
                 </h2>
+
+                <div className="ml-auto">
+                    <select
+                        value={doctorFilter}
+                        onChange={(e) => setDoctorFilter(e.target.value)}
+                        className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary-300 bg-white shadow-sm"
+                    >
+                        <option value="">All Doctors</option>
+                        {doctorList.map((d) => (
+                            <option key={d.id} value={d.id}>{d.name}</option>
+                        ))}
+                    </select>
+                </div>
             </div>
 
             {/* ─── Calendar Grid ─── */}
@@ -244,6 +292,7 @@ export default function Appointments() {
                     onEdit={openEdit}
                     onStatusChange={(id: string, status: string) => statusMutation.mutate({ id, status })}
                     onDelete={(id: string) => deleteMutation.mutate(id)}
+                    sendWaReminder={sendWaReminder}
                 />
             ) : (
                 <WeekView
@@ -262,6 +311,9 @@ export default function Appointments() {
                         <h3 className="text-xl font-bold text-gray-900 mb-4">
                             {editingAppointment ? "Edit Appointment" : "New Appointment"}
                         </h3>
+                        <p className="text-xs text-gray-500 mb-4">
+                            Tip: click empty slots or use + in the calendar grid to create quickly.
+                        </p>
                         <form onSubmit={handleSubmit} className="space-y-4">
                             {/* Patient Picker */}
                             <div>
@@ -377,6 +429,20 @@ export default function Appointments() {
                             </div>
 
                             <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-1">Doctor</label>
+                                <select
+                                    value={formDoctorId}
+                                    onChange={(e) => setFormDoctorId(e.target.value)}
+                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 outline-none"
+                                    required
+                                >
+                                    {doctorList.map((d) => (
+                                        <option key={d.id} value={d.id}>{d.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div>
                                 <label className="block text-sm font-semibold text-gray-700 mb-1">Notes</label>
                                 <textarea
                                     value={formNotes}
@@ -420,6 +486,7 @@ function DayView({
     onEdit,
     onStatusChange,
     onDelete,
+    sendWaReminder,
 }: {
     date: string;
     appointments: Appointment[];
@@ -427,6 +494,7 @@ function DayView({
     onEdit: (appt: Appointment) => void;
     onStatusChange: (id: string, status: string) => void;
     onDelete: (id: string) => void;
+    sendWaReminder: (appt: Appointment) => void;
 }) {
     return (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
@@ -438,18 +506,32 @@ function DayView({
                         className="flex border-b border-gray-100 hover:bg-gray-50/50 transition cursor-pointer min-h-[52px]"
                         onClick={() => slotAppts.length === 0 && onSlotClick(time)}
                     >
-                        <div className="w-20 flex-shrink-0 px-4 py-3 text-sm font-semibold text-gray-400 border-r border-gray-100 flex items-start">
-                            {time}
+                        <div className="w-24 flex-shrink-0 px-3 py-2 text-sm font-semibold text-gray-400 border-r border-gray-100 flex items-center justify-between gap-1">
+                            <span>{time}</span>
+                            <button
+                                type="button"
+                                className="w-5 h-5 rounded bg-primary-100 text-primary-700 hover:bg-primary-200 text-xs font-bold"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onSlotClick(time);
+                                }}
+                                title="Add appointment at this time"
+                            >
+                                +
+                            </button>
                         </div>
                         <div className="flex-1 px-3 py-2 flex flex-wrap gap-2">
                             {slotAppts.map((appt) => (
                                 <div
                                     key={appt.id}
-                                    className={`rounded-lg px-3 py-1.5 border text-sm font-medium flex items-center gap-2 ${STATUS_COLORS[appt.status] || STATUS_COLORS.scheduled}`}
+                                    className={`rounded-lg px-3 py-1.5 border text-sm font-medium flex items-center gap-2 ${STATUS_COLORS[appt.status] || STATUS_COLORS.scheduled} ${DOCTOR_ACCENT[appt.doctorId] || ""}`}
                                     onClick={(e) => e.stopPropagation()}
                                 >
                                     <span className="font-bold">{appt.patientName}</span>
                                     <span className="text-xs opacity-70">{appt.type}</span>
+                                    {appt.doctorName && (
+                                        <span className="text-xs opacity-60 italic">{appt.doctorName}</span>
+                                    )}
                                     {appt.duration !== 30 && (
                                         <span className="text-xs opacity-50">{appt.duration}m</span>
                                     )}
@@ -479,6 +561,15 @@ function DayView({
                                         >
                                             ✎
                                         </button>
+                                        {appt.patientPhone && (
+                                            <button
+                                                onClick={() => sendWaReminder(appt)}
+                                                className="text-xs px-1.5 py-0.5 rounded bg-green-500 text-white hover:bg-green-600"
+                                                title="Send WhatsApp Reminder"
+                                            >
+                                                📱
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
                             ))}
@@ -552,6 +643,19 @@ function WeekView({
                                         className={`border-b border-gray-100 px-1 py-1 align-top cursor-pointer min-w-[120px] ${isToday ? "bg-primary-50/30" : ""}`}
                                         onClick={() => dayAppts.length === 0 && onSlotClick(d, time)}
                                     >
+                                        <div className="flex justify-end mb-1">
+                                            <button
+                                                type="button"
+                                                className="w-5 h-5 rounded bg-primary-100 text-primary-700 hover:bg-primary-200 text-xs font-bold"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onSlotClick(d, time);
+                                                }}
+                                                title="Add appointment"
+                                            >
+                                                +
+                                            </button>
+                                        </div>
                                         {dayAppts.map((appt) => (
                                             <div
                                                 key={appt.id}

@@ -1,311 +1,214 @@
-import { Router } from "express";
-import { db } from "../../db/index.js";
-import { visits, patients, billings, dentalFindings, prescriptions, medicalTerms } from "../../db/schema.js";
-import { eq, sql, desc, count, and, gte, lte, ilike } from "drizzle-orm"; // Add ilike import
-
+﻿import { Router } from "express";
 import { requireAuth, requireRole } from "../auth/index.js";
+import { getLiveDemoBillings, getLiveDemoVisits, demoPatients } from "../../demo-store.js";
 
 const router = Router();
 router.use(requireAuth);
 
-// ─── Daily summary ──────────────────────────────────────────────────
+function filterByDateRange(items: any[], field: string, start: Date, end: Date) {
+    return items.filter((item) => {
+        const d = new Date(item[field]);
+        return d >= start && d <= end;
+    });
+}
 
-router.get("/daily", async (req, res) => {
-    try {
-        const dateStr = (req.query.date as string) || new Date().toISOString().split("T")[0];
-        const startDate = new Date(dateStr);
-        startDate.setHours(0, 0, 0, 0);
-        const endDate = new Date(dateStr);
-        endDate.setHours(23, 59, 59, 999);
+// Daily summary
+router.get("/daily", (req, res) => {
+    const dateStr = (req.query.date as string) || new Date().toISOString().split("T")[0];
+    const start = new Date(dateStr); start.setHours(0, 0, 0, 0);
+    const end = new Date(dateStr); end.setHours(23, 59, 59, 999);
 
-        // Visit count
-        const [{ count: visitCount }] = await db
-            .select({ count: count() })
-            .from(visits)
-            .where(and(gte(visits.startedAt, startDate), lte(visits.startedAt, endDate)));
+    const dayVisits = filterByDateRange(getLiveDemoVisits(), "startedAt", start, end);
+    const dayBillings = filterByDateRange(getLiveDemoBillings(), "createdAt", start, end);
+    const uniquePatients = new Set(dayVisits.map((v) => v.patientId)).size;
+    const totalBilled = dayBillings.reduce((s, b) => s + parseFloat(b.totalAmount || "0"), 0);
+    const totalPaid = dayBillings.reduce((s, b) => s + parseFloat(b.paidAmount || "0"), 0);
 
-        // Patient count (unique)
-        const [patientResult] = await db
-            .select({ count: sql<number>`COUNT(DISTINCT ${visits.patientId})` })
-            .from(visits)
-            .where(and(gte(visits.startedAt, startDate), lte(visits.startedAt, endDate)));
-
-        // Revenue
-        const [revenueResult] = await db
-            .select({
-                totalBilled: sql<string>`COALESCE(SUM(CAST(${billings.totalAmount} AS NUMERIC)), 0)`,
-                totalPaid: sql<string>`COALESCE(SUM(CAST(${billings.paidAmount} AS NUMERIC)), 0)`,
-            })
-            .from(billings)
-            .where(and(gte(billings.createdAt, startDate), lte(billings.createdAt, endDate)));
-
-        res.json({
-            date: dateStr,
-            visitCount: Number(visitCount),
-            uniquePatients: Number(patientResult.count),
-            totalBilled: Number(revenueResult.totalBilled),
-            totalPaid: Number(revenueResult.totalPaid),
-            outstanding: Number(revenueResult.totalBilled) - Number(revenueResult.totalPaid),
-        });
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
+    res.json({
+        date: dateStr,
+        visitCount: dayVisits.length,
+        uniquePatients,
+        totalBilled,
+        totalPaid,
+        outstanding: totalBilled - totalPaid,
+    });
 });
 
-// ─── Monthly overview ───────────────────────────────────────────────
+// Monthly overview
+router.get("/monthly", (req, res) => {
+    const month = parseInt(req.query.month as string) || new Date().getMonth() + 1;
+    const year = parseInt(req.query.year as string) || new Date().getFullYear();
+    const start = new Date(year, month - 1, 1);
+    const end = new Date(year, month, 0, 23, 59, 59, 999);
 
-router.get("/monthly", async (req, res) => {
-    try {
-        const month = parseInt(req.query.month as string) || new Date().getMonth() + 1;
-        const year = parseInt(req.query.year as string) || new Date().getFullYear();
+    const monthVisits = filterByDateRange(getLiveDemoVisits(), "startedAt", start, end);
+    const monthBillings = filterByDateRange(getLiveDemoBillings(), "createdAt", start, end);
 
-        const startDate = new Date(year, month - 1, 1);
-        const endDate = new Date(year, month, 0, 23, 59, 59, 999);
-
-        // Visits per day
-        const dailyVisits = await db
-            .select({
-                date: sql<string>`DATE(${visits.startedAt})`,
-                count: count(),
-            })
-            .from(visits)
-            .where(and(gte(visits.startedAt, startDate), lte(visits.startedAt, endDate)))
-            .groupBy(sql`DATE(${visits.startedAt})`)
-            .orderBy(sql`DATE(${visits.startedAt})`);
-
-        // Revenue
-        const [revenueResult] = await db
-            .select({
-                totalBilled: sql<string>`COALESCE(SUM(CAST(${billings.totalAmount} AS NUMERIC)), 0)`,
-                totalPaid: sql<string>`COALESCE(SUM(CAST(${billings.paidAmount} AS NUMERIC)), 0)`,
-            })
-            .from(billings)
-            .where(and(gte(billings.createdAt, startDate), lte(billings.createdAt, endDate)));
-
-        // Top findings
-        const topDiagnoses = await db
-            .select({
-                name: dentalFindings.findingType,
-                count: count(),
-            })
-            .from(dentalFindings)
-            .innerJoin(visits, eq(dentalFindings.visitId, visits.id))
-            .where(and(gte(visits.startedAt, startDate), lte(visits.startedAt, endDate)))
-            .groupBy(dentalFindings.findingType)
-            .orderBy(desc(count()))
-            .limit(10);
-
-        res.json({
-            month,
-            year,
-            dailyVisits,
-            totalBilled: Number(revenueResult.totalBilled),
-            totalPaid: Number(revenueResult.totalPaid),
-            topDiagnoses,
-        });
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
+    // Visits per day
+    const dailyCounts: Record<string, number> = {};
+    for (const v of monthVisits) {
+        const d = new Date(v.startedAt).toISOString().split("T")[0];
+        dailyCounts[d] = (dailyCounts[d] || 0) + 1;
     }
-});
+    const dailyVisits = Object.entries(dailyCounts).map(([date, count]) => ({ date, count })).sort((a, b) => a.date.localeCompare(b.date));
 
-// ─── Top medications ────────────────────────────────────────────────
+    const totalBilled = monthBillings.reduce((s, b) => s + parseFloat(b.totalAmount || "0"), 0);
+    const totalPaid = monthBillings.reduce((s, b) => s + parseFloat(b.paidAmount || "0"), 0);
 
-router.get("/top-medications", async (req, res) => {
-    try {
-        const results = await db
-            .select({
-                term: medicalTerms.term,
-                usageCount: medicalTerms.usageCount,
-            })
-            .from(medicalTerms)
-            .where(eq(medicalTerms.category, "medication"))
-            .orderBy(desc(medicalTerms.usageCount))
-            .limit(20);
-
-        res.json(results);
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// ─── Top diagnoses ──────────────────────────────────────────────────
-
-router.get("/top-diagnoses", async (req, res) => {
-    try {
-        const results = await db
-            .select({
-                term: medicalTerms.term,
-                usageCount: medicalTerms.usageCount,
-            })
-            .from(medicalTerms)
-            .where(eq(medicalTerms.category, "diagnosis"))
-            .orderBy(desc(medicalTerms.usageCount))
-            .limit(20);
-
-        res.json(results);
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// ─── Prescription Report ────────────────────────────────────────────
-
-router.get("/prescriptions", async (req, res) => {
-    try {
-        const startDateStr = req.query.startDate as string;
-        const endDateStr = req.query.endDate as string;
-        const medication = req.query.medication as string;
-
-        if (!startDateStr || !endDateStr) {
-            return res.status(400).json({ error: "Start date and end date are required" });
+    // Top diagnoses from dental findings
+    const findingCounts: Record<string, number> = {};
+    for (const v of monthVisits) {
+        for (const f of (v.dentalFindings || [])) {
+            findingCounts[f.findingType] = (findingCounts[f.findingType] || 0) + 1;
         }
-
-        const startDate = new Date(startDateStr);
-        startDate.setHours(0, 0, 0, 0);
-        const endDate = new Date(endDateStr);
-        endDate.setHours(23, 59, 59, 999);
-
-        const dateFilter = and(
-            gte(visits.startedAt, startDate),
-            lte(visits.startedAt, endDate),
-            medication ? ilike(prescriptions.medicationName, `%${medication}%`) : undefined
-        );
-
-        // Get detailed prescription rows
-        const rows = await db
-            .select({
-                id: prescriptions.id,
-                medicationName: prescriptions.medicationName,
-                dosage: prescriptions.dosage,
-                frequency: prescriptions.frequency,
-                duration: prescriptions.duration,
-                visitDate: visits.startedAt,
-                patientName: sql<string>`${patients.firstName} || ' ' || ${patients.lastName}`,
-                patientId: patients.id,
-                patientFileNumber: patients.fileNumber,
-            })
-            .from(prescriptions)
-            .innerJoin(visits, eq(prescriptions.visitId, visits.id))
-            .innerJoin(patients, eq(visits.patientId, patients.id))
-            .where(dateFilter)
-            .orderBy(desc(visits.startedAt));
-
-        // Get total prescription count (all-time) for the searched medication
-        let totalAllTime = 0;
-        if (medication) {
-            const [result] = await db
-                .select({ count: count() })
-                .from(prescriptions)
-                .where(ilike(prescriptions.medicationName, `%${medication}%`));
-            totalAllTime = Number(result.count);
-        }
-
-        // Get unique patient count for this medication in the date range
-        const uniquePatients = new Set(rows.map(r => r.patientId)).size;
-
-        res.json({
-            rows,
-            totalInRange: rows.length,
-            totalAllTime,
-            uniquePatients,
-            medication: medication || null,
-        });
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
     }
+    const topDiagnoses = Object.entries(findingCounts)
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 10);
+
+    res.json({
+        month, year,
+        totalVisits: monthVisits.length,
+        totalBilled,
+        totalPaid,
+        outstanding: totalBilled - totalPaid,
+        dailyVisits,
+        topDiagnoses,
+    });
 });
 
-// ─── Export: Patients CSV ───────────────────────────────────────────
+// Patient statistics
+router.get("/patients", (req, res) => {
+    const from = req.query.from as string;
+    const to = req.query.to as string;
 
-router.get("/export/patients", requireRole("admin"), async (_req, res) => {
-    try {
-        const allPatients = await db
-            .select({
-                fileNumber: patients.fileNumber,
-                firstName: patients.firstName,
-                lastName: patients.lastName,
-                fatherName: patients.fatherName,
-                gender: patients.gender,
-                dateOfBirth: patients.dateOfBirth,
-                phone: patients.phone,
-                city: sql<string>`COALESCE(${patients.city}, '')`,
-                createdAt: patients.createdAt,
-            })
-            .from(patients)
-            .orderBy(patients.fileNumber);
-
-        const headers = "File #,First Name,Last Name,Father,Gender,DOB,Phone,City,Registered\n";
-        const rows = allPatients
-            .map((p) => [
-                p.fileNumber,
-                `"${p.firstName}"`,
-                `"${p.lastName}"`,
-                `"${p.fatherName || ""}"`,
-                p.gender || "",
-                p.dateOfBirth || "",
-                p.phone || "",
-                `"${p.city}"`,
-                p.createdAt ? new Date(p.createdAt).toISOString().split("T")[0] : "",
-            ].join(","))
-            .join("\n");
-
-        res.setHeader("Content-Type", "text/csv");
-        res.setHeader("Content-Disposition", "attachment; filename=patients.csv");
-        res.send(headers + rows);
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
+    let pvs = [...demoVisits];
+    if (from || to) {
+        const start = from ? new Date(from) : new Date(0);
+        const end = to ? new Date(to + "T23:59:59") : new Date();
+        pvs = filterByDateRange(pvs, "startedAt", start, end);
     }
+
+    const newPatientIds = new Set(pvs.filter((v) => v.visitNumber === 1).map((v) => v.patientId));
+    const genderCounts: Record<string, number> = {};
+    for (const id of newPatientIds) {
+        const pt = demoPatients.find((p) => p.id === id);
+        if (pt) genderCounts[pt.gender] = (genderCounts[pt.gender] || 0) + 1;
+    }
+
+    res.json({
+        totalNewPatients: newPatientIds.size,
+        genderBreakdown: genderCounts,
+        totalVisits: pvs.length,
+    });
 });
 
-// ─── Export: Billing CSV ────────────────────────────────────────────
+// Financial breakdown by procedure category
+router.get("/financial", (req, res) => {
+    const from = req.query.from as string;
+    const to = req.query.to as string;
 
-router.get("/export/billing", requireRole("admin"), async (req, res) => {
-    try {
-        const startDateStr = req.query.startDate as string;
-        const endDateStr = req.query.endDate as string;
+    const start = from ? new Date(from + "T00:00:00") : new Date(new Date().setDate(1));
+    const end = to ? new Date(to + "T23:59:59") : new Date();
 
-        let dateFilter;
-        if (startDateStr && endDateStr) {
-            const startDate = new Date(startDateStr);
-            startDate.setHours(0, 0, 0, 0);
-            const endDate = new Date(endDateStr);
-            endDate.setHours(23, 59, 59, 999);
-            dateFilter = and(gte(billings.createdAt, startDate), lte(billings.createdAt, endDate));
-        }
+    const rangeVisits = filterByDateRange(getLiveDemoVisits(), "startedAt", start, end);
+    const rangeBillings = filterByDateRange(getLiveDemoBillings(), "createdAt", start, end);
 
-        const allBillings = await db
-            .select({
-                date: billings.createdAt,
-                patientName: sql<string>`${patients.firstName} || ' ' || ${patients.lastName}`,
-                fileNumber: patients.fileNumber,
-                totalAmount: billings.totalAmount,
-                paidAmount: billings.paidAmount,
-                status: billings.status,
-            })
-            .from(billings)
-            .innerJoin(visits, eq(billings.visitId, visits.id))
-            .innerJoin(patients, eq(visits.patientId, patients.id))
-            .where(dateFilter)
-            .orderBy(desc(billings.createdAt));
-
-        const headers = "Date,Patient,File #,Total,Paid,Status\n";
-        const rows = allBillings
-            .map((b) => [
-                b.date ? new Date(b.date).toISOString().split("T")[0] : "",
-                `"${b.patientName}"`,
-                b.fileNumber,
-                b.totalAmount,
-                b.paidAmount,
-                b.status,
-            ].join(","))
-            .join("\n");
-
-        res.setHeader("Content-Type", "text/csv");
-        res.setHeader("Content-Disposition", "attachment; filename=billing.csv");
-        res.send(headers + rows);
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
+    // Revenue by visit type
+    const revenueByType: Record<string, { billed: number; paid: number; count: number }> = {};
+    for (const b of rangeBillings) {
+        const visit = getLiveDemoVisits().find((v) => v.id === b.visitId);
+        const type = visit?.visitType || "other";
+        if (!revenueByType[type]) revenueByType[type] = { billed: 0, paid: 0, count: 0 };
+        revenueByType[type].billed += parseFloat(b.totalAmount || "0");
+        revenueByType[type].paid += parseFloat(b.paidAmount || "0");
+        revenueByType[type].count++;
     }
+
+    // Revenue by procedure category
+    const revenueByProcedure: Record<string, { total: number; count: number }> = {};
+    for (const v of rangeVisits) {
+        for (const proc of (v.dentalProcedures || [])) {
+            const cat = proc.category || "other";
+            if (!revenueByProcedure[cat]) revenueByProcedure[cat] = { total: 0, count: 0 };
+            revenueByProcedure[cat].total += parseFloat(proc.cost || "0");
+            revenueByProcedure[cat].count++;
+        }
+    }
+
+    // Daily revenue trend within range
+    const dailyRevenue: Record<string, { billed: number; paid: number }> = {};
+    for (const b of rangeBillings) {
+        const d = new Date(b.createdAt).toISOString().split("T")[0];
+        if (!dailyRevenue[d]) dailyRevenue[d] = { billed: 0, paid: 0 };
+        dailyRevenue[d].billed += parseFloat(b.totalAmount || "0");
+        dailyRevenue[d].paid += parseFloat(b.paidAmount || "0");
+    }
+    const dailyTrend = Object.entries(dailyRevenue)
+        .map(([date, v]) => ({ date, ...v }))
+        .sort((a, b) => a.date.localeCompare(b.date));
+
+    const totalBilled = rangeBillings.reduce((s, b) => s + parseFloat(b.totalAmount || "0"), 0);
+    const totalPaid = rangeBillings.reduce((s, b) => s + parseFloat(b.paidAmount || "0"), 0);
+    const paidCount = rangeBillings.filter((b) => b.status === "paid").length;
+    const partialCount = rangeBillings.filter((b) => b.status === "partial").length;
+    const unpaidCount = rangeBillings.filter((b) => b.status === "unpaid").length;
+
+    res.json({
+        from: start.toISOString().split("T")[0],
+        to: end.toISOString().split("T")[0],
+        totalBilled,
+        totalPaid,
+        outstanding: totalBilled - totalPaid,
+        collectionRate: totalBilled > 0 ? Math.round((totalPaid / totalBilled) * 100) : 0,
+        paidCount, partialCount, unpaidCount,
+        revenueByType: Object.entries(revenueByType).map(([type, v]) => ({ type, ...v })).sort((a, b) => b.paid - a.paid),
+        revenueByProcedure: Object.entries(revenueByProcedure).map(([category, v]) => ({ category, ...v })).sort((a, b) => b.total - a.total),
+        dailyTrend,
+        totalVisits: rangeVisits.length,
+    });
+});
+
+// Prescriptions report
+router.get("/prescriptions", (req, res) => {
+    const from = req.query.from as string;
+    const to = req.query.to as string;
+    const medication = (req.query.medication as string || "").toLowerCase().trim();
+
+    const start = from ? new Date(from + "T00:00:00") : new Date(new Date().setDate(new Date().getDate() - 30));
+    const end = to ? new Date(to + "T23:59:59") : new Date();
+
+    const rangeVisits = filterByDateRange(getLiveDemoVisits(), "startedAt", start, end);
+    const rows: any[] = [];
+    for (const v of rangeVisits) {
+        const pt = demoPatients.find((p) => p.id === v.patientId);
+        for (const rx of (v.prescriptions || [])) {
+            if (medication && !rx.medicationName?.toLowerCase().includes(medication)) continue;
+            rows.push({
+                id: rx.id,
+                visitDate: v.startedAt,
+                patientName: pt ? `${pt.firstName} ${pt.lastName}` : "Unknown",
+                patientFileNumber: pt?.fileNumber,
+                medicationName: rx.medicationName,
+                dosage: rx.dosage,
+                frequency: rx.frequency,
+                duration: rx.duration,
+            });
+        }
+    }
+
+    const allTimeMedCount = medication
+        ? demoVisits.flatMap((v) => v.prescriptions || []).filter((rx: any) => rx.medicationName?.toLowerCase().includes(medication)).length
+        : 0;
+
+    res.json({
+        rows,
+        totalInRange: rows.length,
+        totalAllTime: allTimeMedCount,
+        medication: medication || null,
+        uniquePatients: new Set(rows.map((r) => r.patientFileNumber)).size,
+    });
 });
 
 export { router as reportRouter };

@@ -6,6 +6,9 @@ import AutocompleteInput from "../components/AutocompleteInput";
 type SortKey = "visitDate" | "patientName" | "patientFileNumber" | "medicationName" | "dosage" | "frequency" | "duration";
 type SortDir = "asc" | "desc";
 
+const thisMonthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split("T")[0];
+const today = new Date().toISOString().split("T")[0];
+
 export default function Reports() {
     // ... existing queries
 
@@ -17,11 +20,20 @@ export default function Reports() {
     const [medicationFilter, setMedicationFilter] = useState("");
     const [showCustomReport, setShowCustomReport] = useState(false);
 
+    // Financial report date range
+    const [finFrom, setFinFrom] = useState(thisMonthStart);
+    const [finTo, setFinTo] = useState(today);
+
     // Sorting State
     const [sortKey, setSortKey] = useState<SortKey>("visitDate");
     const [sortDir, setSortDir] = useState<SortDir>("desc");
 
     const { data: user } = useQuery({ queryKey: ["auth", "me"], queryFn: api.auth.me });
+
+    const { data: financialReport } = useQuery({
+        queryKey: ["reports", "financial", finFrom, finTo],
+        queryFn: () => api.reports.financial(finFrom, finTo),
+    });
 
     const { data: prescriptionReport, refetch: generateReport, isFetching: reportLoading } = useQuery({
         queryKey: ["reports", "prescriptions", startDate, endDate, medicationFilter],
@@ -107,6 +119,116 @@ export default function Reports() {
 
                 {/* ─── Top Medications ─── */}
                 {/* ... existing medications */}
+            </div>
+
+            {/* ─── Financial Report ─── */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 mb-8">
+                <div className="flex items-center justify-between mb-6">
+                    <h2 className="text-2xl font-bold text-gray-800">💰 Financial Report</h2>
+                    <div className="flex gap-3 items-center">
+                        <div>
+                            <label className="block text-xs font-semibold text-gray-500 mb-1">From</label>
+                            <input type="date" value={finFrom} onChange={(e) => setFinFrom(e.target.value)}
+                                className="px-3 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-primary-400 outline-none" />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-semibold text-gray-500 mb-1">To</label>
+                            <input type="date" value={finTo} onChange={(e) => setFinTo(e.target.value)}
+                                className="px-3 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-primary-400 outline-none" />
+                        </div>
+                    </div>
+                </div>
+
+                {financialReport && (
+                    <>
+                        {/* KPI Cards */}
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                            <div className="bg-blue-50 border border-blue-100 rounded-2xl p-5 text-center">
+                                <p className="text-2xl font-extrabold text-blue-700">${financialReport.totalBilled?.toFixed(0)}</p>
+                                <p className="text-sm text-blue-500 mt-1">Total Charged</p>
+                            </div>
+                            <div className="bg-green-50 border border-green-100 rounded-2xl p-5 text-center">
+                                <p className="text-2xl font-extrabold text-green-700">${financialReport.totalPaid?.toFixed(0)}</p>
+                                <p className="text-sm text-green-500 mt-1">Total Collected</p>
+                            </div>
+                            <div className="bg-red-50 border border-red-100 rounded-2xl p-5 text-center">
+                                <p className="text-2xl font-extrabold text-red-700">${financialReport.outstanding?.toFixed(0)}</p>
+                                <p className="text-sm text-red-500 mt-1">Outstanding</p>
+                            </div>
+                            <div className="bg-purple-50 border border-purple-100 rounded-2xl p-5 text-center">
+                                <p className="text-2xl font-extrabold text-purple-700">{financialReport.collectionRate}%</p>
+                                <p className="text-sm text-purple-500 mt-1">Collection Rate</p>
+                            </div>
+                        </div>
+
+                        {/* Payment Status Breakdown + Revenue by Visit Type */}
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                            {/* Payment Status */}
+                            <div>
+                                <h3 className="text-sm font-bold text-gray-600 uppercase tracking-wide mb-3">Payment Status</h3>
+                                <div className="space-y-2">
+                                    {[
+                                        { label: "Paid", count: financialReport.paidCount, color: "bg-green-500" },
+                                        { label: "Partial", count: financialReport.partialCount, color: "bg-yellow-400" },
+                                        { label: "Unpaid", count: financialReport.unpaidCount, color: "bg-red-400" },
+                                    ].map(({ label, count, color }) => {
+                                        const total = (financialReport.paidCount || 0) + (financialReport.partialCount || 0) + (financialReport.unpaidCount || 0);
+                                        const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+                                        return (
+                                            <div key={label}>
+                                                <div className="flex justify-between text-sm mb-1">
+                                                    <span className="font-medium text-gray-700">{label}</span>
+                                                    <span className="text-gray-500">{count} ({pct}%)</span>
+                                                </div>
+                                                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                                                    <div className={`h-full ${color} rounded-full`} style={{ width: `${pct}%` }} />
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+
+                            {/* Revenue by Visit Type */}
+                            <div>
+                                <h3 className="text-sm font-bold text-gray-600 uppercase tracking-wide mb-3">Revenue by Visit Type</h3>
+                                {financialReport.revenueByType?.length === 0 ? (
+                                    <p className="text-gray-400 text-sm">No billing data in range</p>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {financialReport.revenueByType?.slice(0, 6).map((row: any) => (
+                                            <div key={row.type} className="flex items-center justify-between p-2.5 bg-gray-50 rounded-lg">
+                                                <span className="font-medium text-gray-700 capitalize">{row.type}</span>
+                                                <div className="text-right">
+                                                    <span className="font-bold text-green-700">${row.paid.toFixed(0)}</span>
+                                                    {row.billed > row.paid && (
+                                                        <span className="text-xs text-gray-400 ml-1">/ ${row.billed.toFixed(0)}</span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Revenue by Procedure Category */}
+                        {financialReport.revenueByProcedure?.length > 0 && (
+                            <div>
+                                <h3 className="text-sm font-bold text-gray-600 uppercase tracking-wide mb-3">Revenue by Procedure Category</h3>
+                                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                                    {financialReport.revenueByProcedure.map((row: any) => (
+                                        <div key={row.category} className="bg-gray-50 border border-gray-100 rounded-xl p-3 text-center">
+                                            <p className="text-lg font-extrabold text-gray-800">${row.total.toFixed(0)}</p>
+                                            <p className="text-xs text-gray-500 capitalize mt-1">{row.category}</p>
+                                            <p className="text-[10px] text-gray-400">{row.count} procedure{row.count !== 1 ? "s" : ""}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </>
+                )}
             </div>
 
             {/* ─── Custom Reports ─── */}

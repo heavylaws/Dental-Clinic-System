@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+﻿import { useState, useEffect } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
@@ -7,12 +7,21 @@ type DeviceMode = "choose" | "desktop" | "mobile";
 
 export default function Login() {
     const navigate = useNavigate();
-    const savedMode = localStorage.getItem("dermclinic-device") as DeviceMode | null;
+    const savedMode = localStorage.getItem("dentalclinic-device") as DeviceMode | null;
     const [mode, setMode] = useState<DeviceMode>(savedMode === "mobile" ? "mobile" : savedMode === "desktop" ? "desktop" : "choose");
     const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
     const [error, setError] = useState("");
+    const [branding, setBranding] = useState({
+        clinicName: "DentalClinic",
+        clinicIcon: "🦷",
+        clinicSubtitle: "Clinic Management System",
+    });
     const queryClient = useQueryClient();
+
+    useEffect(() => {
+        api.public.branding().then(setBranding).catch(() => {});
+    }, []);
 
     const loginMutation = useMutation({
         mutationFn: () => api.auth.login(username, password),
@@ -39,7 +48,7 @@ export default function Login() {
 
     const pickDevice = (d: "desktop" | "mobile") => {
         setMode(d);
-        localStorage.setItem("dermclinic-device", d);
+        localStorage.setItem("dentalclinic-device", d);
         if (d === "mobile") {
             // If already logged in, go directly
             api.auth.me().then(() => navigate("/m")).catch(() => {});
@@ -77,7 +86,7 @@ export default function Login() {
                             display: "flex", alignItems: "center", justifyContent: "center",
                             boxShadow: "0 20px 60px rgba(29, 87, 214, 0.5), 0 0 80px rgba(59, 138, 244, 0.2)",
                         }}>
-                            <span style={{ fontSize: "44px" }}>🩺</span>
+                            <span style={{ fontSize: "44px" }}>{branding.clinicIcon}</span>
                         </div>
                         <h1 style={{
                             fontSize: "2.4rem", fontWeight: 900, margin: "0 0 6px",
@@ -85,7 +94,7 @@ export default function Login() {
                             WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
                             letterSpacing: "-0.02em",
                         }}>
-                            DermClinic
+                            {branding.clinicName}
                         </h1>
                         <p style={{ color: "#64748b", fontSize: "1rem", fontWeight: 500 }}>
                             Select your device to continue
@@ -219,10 +228,10 @@ export default function Login() {
                     <div className="w-full max-w-md">
                         <div className="text-center mb-10">
                             <div className="inline-flex items-center justify-center w-24 h-24 rounded-full bg-gradient-to-br from-primary-500 to-primary-700 shadow-xl mb-6">
-                                <span className="text-5xl">🩺</span>
+                                <span className="text-5xl">{branding.clinicIcon}</span>
                             </div>
-                            <h1 className="text-4xl font-extrabold text-primary-900 mb-2">DermClinic</h1>
-                            <p className="text-xl text-gray-500">Clinic Management System</p>
+                            <h1 className="text-4xl font-extrabold text-primary-900 mb-2">{branding.clinicName}</h1>
+                            <p className="text-xl text-gray-500">{branding.clinicSubtitle}</p>
                         </div>
 
                         <div className="bg-white rounded-2xl shadow-2xl p-10 border border-gray-100">
@@ -246,7 +255,7 @@ export default function Login() {
                                 </button>
                             </form>
                             <div className="mt-6 pt-6 border-t border-gray-100 flex items-center justify-between">
-                                <button onClick={() => { setMode("choose"); localStorage.removeItem("dermclinic-device"); }}
+                                <button onClick={() => { setMode("choose"); localStorage.removeItem("dentalclinic-device"); }}
                                     className="text-sm text-gray-400 hover:text-primary-600 transition">
                                     ← Switch Device
                                 </button>
@@ -283,13 +292,13 @@ export default function Login() {
                                 display: "flex", alignItems: "center", justifyContent: "center",
                                 boxShadow: "0 16px 48px rgba(29, 87, 214, 0.5)",
                             }}>
-                                <span style={{ fontSize: "40px" }}>🩺</span>
+                            <span style={{ fontSize: "40px" }}>{branding.clinicIcon}</span>
                             </div>
                             <h1 style={{
                                 fontSize: "2rem", fontWeight: 900, margin: "0 0 4px",
                                 background: "linear-gradient(135deg, #ffffff, #93c5fd)",
                                 WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
-                            }}>DermClinic</h1>
+                            }}>{branding.clinicName}</h1>
                             <p style={{ color: "#64748b", fontSize: "0.9rem" }}>Smartphone Mode</p>
                         </div>
 
@@ -350,7 +359,7 @@ export default function Login() {
                                 borderTop: "1px solid rgba(255,255,255,0.08)",
                                 display: "flex", justifyContent: "space-between",
                             }}>
-                                <button onClick={() => { setMode("choose"); localStorage.removeItem("dermclinic-device"); }}
+                                <button onClick={() => { setMode("choose"); localStorage.removeItem("dentalclinic-device"); }}
                                     style={{ background: "transparent", border: "none", color: "#64748b", fontSize: "0.82rem", cursor: "pointer" }}>
                                     ← Switch Device
                                 </button>

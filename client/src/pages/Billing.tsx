@@ -2,9 +2,13 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 
+function getGmtDateString() {
+    return new Date().toISOString().split("T")[0];
+}
+
 export default function Billing() {
-    const [startDate, setStartDate] = useState(new Date().toISOString().split("T")[0]);
-    const [endDate, setEndDate] = useState(new Date().toISOString().split("T")[0]);
+    const [startDate, setStartDate] = useState(getGmtDateString());
+    const [endDate, setEndDate] = useState(getGmtDateString());
 
     const { data: user } = useQuery({ queryKey: ["auth", "me"], queryFn: api.auth.me });
 

@@ -1,148 +1,78 @@
-import { Router } from "express";
-import { db } from "../../db/index.js";
-import { settings } from "../../db/schema.js";
-import { eq } from "drizzle-orm";
+﻿import { Router } from "express";
 import { requireAuth, requireRole } from "../auth/index.js";
-import multer from "multer";
+import {
+    demoSettings, demoPatients, demoVisits, demoAppointments,
+    demoBillings, demoRecalls, demoFollowUps, demoReferrals,
+} from "../../demo-store.js";
+import os from "os";
 import path from "path";
 import fs from "fs";
-import { spawn } from "child_process";
-import os from "os";
 
 const router = Router();
 router.use(requireAuth);
 
-// ─── Server Info (network IPs) ──────────────────────────────────────
-
+// Server info (non-DB, keep original logic)
 router.get("/server-info", requireRole("admin"), (_req, res) => {
-    try {
-        const interfaces = os.networkInterfaces();
-        const addresses: { name: string; address: string; family: string }[] = [];
-
-        for (const [name, nets] of Object.entries(interfaces)) {
-            if (!nets) continue;
-            for (const net of nets) {
-                // Skip internal (loopback) and non-IPv4 addresses
-                if (!net.internal && net.family === "IPv4") {
-                    addresses.push({
-                        name,
-                        address: net.address,
-                        family: net.family,
-                    });
-                }
+    const interfaces = os.networkInterfaces();
+    const addresses: { name: string; address: string; family: string }[] = [];
+    for (const [name, nets] of Object.entries(interfaces)) {
+        if (!nets) continue;
+        for (const net of nets) {
+            if (!net.internal && net.family === "IPv4") {
+                addresses.push({ name, address: net.address, family: net.family });
             }
         }
-
-        const port = process.env.PORT || "3002";
-        const uiPort = "5174"; // The dashboard runs on port 5174
-        const hostname = os.hostname();
-
-        const certPath = path.join(process.cwd(), "certs", "cert.pem");
-        const httpsEnabled = fs.existsSync(certPath);
-
-        res.json({
-            hostname,
-            port,
-            uiPort,
-            addresses,
-            accessUrls: addresses.map((a) => `http://${a.address}:${uiPort}`),
-            httpsUrls: httpsEnabled
-                ? addresses.map((a) => `https://${a.address}:${uiPort}`)
-                : [],
-        });
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
     }
+    const port = process.env.PORT || "3002";
+    const uiPort = process.env.UI_PORT || "5175";
+    const hostname = os.hostname();
+    const certPath = path.join(process.cwd(), "certs", "cert.pem");
+    const httpsEnabled = fs.existsSync(certPath);
+    res.json({
+        hostname, port, uiPort, addresses,
+        accessUrls: addresses.map((a) => `http://${a.address}:${uiPort}`),
+        httpsUrls: httpsEnabled ? addresses.map((a) => `https://${a.address}:${uiPort}`) : [],
+    });
 });
 
-const BACKUP_DIR = path.join(process.cwd(), "bu_backup");
-if (!fs.existsSync(BACKUP_DIR)) {
-    fs.mkdirSync(BACKUP_DIR, { recursive: true });
-}
-
-const storage = multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, BACKUP_DIR),
-    filename: (_req, _file, cb) => cb(null, "bu.bak"),
+// Get all settings
+router.get("/", (_req, res) => {
+    res.json({ ...demoSettings });
 });
 
-const upload = multer({
-    storage,
-    limits: { fileSize: 1024 * 1024 * 1024 }, // 1GB max limit for .bak
-});
-
-// ─── Get all settings ───────────────────────────────────────────────
-
-router.get("/", async (_req, res) => {
-    try {
-        const allSettings = await db.select().from(settings);
-        // Convert to key-value object
-        const obj: Record<string, string> = {};
-        for (const s of allSettings) {
-            obj[s.key] = s.value;
-        }
-        res.json(obj);
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
+// Update settings
+router.put("/", requireRole("admin"), (req, res) => {
+    const entries = req.body as Record<string, string>;
+    for (const [key, value] of Object.entries(entries)) {
+        demoSettings[key] = value;
     }
+    res.json({ ...demoSettings });
 });
 
-// ─── Update settings (admin only) ───────────────────────────────────
-
-router.put("/", requireRole("admin"), async (req, res) => {
-    try {
-        const entries = req.body as Record<string, string>;
-
-        for (const [key, value] of Object.entries(entries)) {
-            const [existing] = await db.select().from(settings).where(eq(settings.key, key)).limit(1);
-            if (existing) {
-                await db.update(settings).set({ value, updatedAt: new Date() }).where(eq(settings.key, key));
-            } else {
-                await db.insert(settings).values({ key, value });
-            }
-        }
-
-        // Return updated settings
-        const allSettings = await db.select().from(settings);
-        const obj: Record<string, string> = {};
-        for (const s of allSettings) {
-            obj[s.key] = s.value;
-        }
-        res.json(obj);
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
+// Backup: export all in-memory data as JSON
+router.get("/backup", requireRole("admin"), (_req, res) => {
+    const payload = {
+        exportedAt: new Date().toISOString(),
+        version: 1,
+        data: {
+            settings: { ...demoSettings },
+            patients: demoPatients,
+            visits: demoVisits,
+            appointments: demoAppointments,
+            billings: demoBillings,
+            recalls: demoRecalls,
+            followUps: demoFollowUps,
+            referrals: demoReferrals,
+        },
+    };
+    const filename = `dental-backup-${new Date().toISOString().split("T")[0]}.json`;
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.json(payload);
 });
 
-// ─── Restore Database (admin only) ──────────────────────────────────
-
-router.post("/restore", requireRole("admin"), upload.single("backup"), (req, res) => {
-    if (!req.file) {
-        res.status(400).json({ error: "No backup file uploaded" });
-        return;
-    }
-
-    res.setHeader("Content-Type", "text/plain; charset=utf-8");
-    res.setHeader("Transfer-Encoding", "chunked");
-    res.setHeader("Connection", "keep-alive");
-    req.setTimeout(0); // Disable timeout since migration can take a while
-
-    const scriptPath = path.join(process.cwd(), "scripts", "migrate.ts");
-    const child = spawn("npx", ["tsx", scriptPath, req.file.path], {
-        cwd: process.cwd(),
-    });
-
-    child.stdout.on("data", (data) => {
-        res.write(data.toString());
-    });
-
-    child.stderr.on("data", (data) => {
-        res.write(data.toString());
-    });
-
-    child.on("close", (code) => {
-        res.write(`\nProcess exited with code ${code}\n`);
-        res.end();
-    });
+router.post("/restore", requireRole("admin"), (_req, res) => {
+    res.json({ message: "Restore not available in demo mode — contact your system administrator to restore from a backup file." });
 });
 
 export { router as settingsRouter };

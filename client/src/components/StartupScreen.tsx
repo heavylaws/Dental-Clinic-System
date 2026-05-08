@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { api } from "../lib/api";
 
 interface StartupScreenProps {
     onReady: () => void;
@@ -17,6 +18,15 @@ export default function StartupScreen({ onReady }: StartupScreenProps) {
     const [currentStep, setCurrentStep] = useState(0);
     const [statusMessage, setStatusMessage] = useState("Waiting for server...");
     const [fadeOut, setFadeOut] = useState(false);
+    const [branding, setBranding] = useState({
+        clinicName: "DentalClinic",
+        clinicIcon: "🦷",
+        clinicSubtitle: "Dental Practice Management System",
+    });
+
+    useEffect(() => {
+        api.public.branding().then(setBranding).catch(() => {});
+    }, []);
 
     // Advance visual steps based on elapsed time
     useEffect(() => {
@@ -98,11 +108,11 @@ export default function StartupScreen({ onReady }: StartupScreenProps) {
                 {/* Logo */}
                 <div className="startup-logo">
                     <div className="startup-logo-icon">
-                        <span className="startup-logo-emoji">🩺</span>
+                        <span className="startup-logo-emoji">{branding.clinicIcon}</span>
                         <div className="startup-logo-ring" />
                     </div>
-                    <h1 className="startup-title">DermClinic</h1>
-                    <p className="startup-subtitle">Dermatology Management System</p>
+                    <h1 className="startup-title">{branding.clinicName}</h1>
+                    <p className="startup-subtitle">{branding.clinicSubtitle}</p>
                 </div>
 
                 {/* Progress bar */}

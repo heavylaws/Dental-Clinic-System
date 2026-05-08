@@ -13,6 +13,9 @@ import Patients from "./pages/Patients";
 import Appointments from "./pages/Appointments";
 import Users from "./pages/Users";
 import Settings from "./pages/Settings";
+import Recalls from "./pages/Recalls";
+import AuditLog from "./pages/AuditLog";
+import WhatsApp from "./pages/WhatsApp";
 import StartupScreen from "./components/StartupScreen";
 
 export default function App() {
@@ -92,6 +95,9 @@ function DesktopApp() {
                 <Route path="/patients" element={<Patients />} />
                 <Route path="/billing" element={<Billing />} />
                 <Route path="/appointments" element={<Appointments />} />
+                <Route path="/recalls" element={<Recalls />} />
+                <Route path="/audit-log" element={<AuditLog />} />
+                <Route path="/whatsapp" element={<WhatsApp />} />
                 <Route path="/users" element={<Users />} />
                 <Route path="/settings" element={<Settings />} />
             </Route>

@@ -1,171 +1,66 @@
-import { Router } from "express";
-import { db } from "../../db/index.js";
-import { treatmentPlans, treatmentPlanItems } from "../../db/schema.js";
-import { eq, desc } from "drizzle-orm";
+﻿import { Router } from "express";
 import { requireAuth } from "../auth/index.js";
+import { v4 as uuidv4 } from "uuid";
 
 const router = Router();
 router.use(requireAuth);
 
-// ─── Get all treatment plans for a patient ──────────────────────────
+const demoTreatmentPlans: any[] = [];
 
-router.get("/patient/:patientId", async (req, res) => {
-    try {
-        const plans = await db.query.treatmentPlans.findMany({
-            where: eq(treatmentPlans.patientId, req.params.patientId),
-            with: {
-                items: {
-                    orderBy: (items, { asc }) => [asc(items.sequenceOrder)]
-                }
-            },
-            orderBy: [desc(treatmentPlans.createdAt)],
-        });
-        res.json(plans);
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
+router.get("/patient/:patientId", (req, res) => {
+    const plans = demoTreatmentPlans.filter((p) => p.patientId === req.params.patientId);
+    res.json(plans);
 });
 
-// ─── Create a treatment plan ────────────────────────────────────────
-
-router.post("/", async (req, res) => {
-    try {
-        const { patientId, title, priority, notes } = req.body;
-        
-        const [plan] = await db.insert(treatmentPlans).values({
-            patientId,
-            title,
-            priority: priority || "normal",
-            notes,
-            createdBy: (req.user as any)?.id,
-            status: "draft"
-        }).returning();
-
-        res.status(201).json(plan);
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
+router.post("/", (req, res) => {
+    const plan = {
+        id: uuidv4(),
+        status: "draft",
+        priority: "normal",
+        createdBy: (req.user as any)?.id,
+        createdAt: new Date().toISOString(),
+        items: [],
+        ...req.body,
+    };
+    demoTreatmentPlans.push(plan);
+    res.status(201).json(plan);
 });
 
-// ─── Update a treatment plan ────────────────────────────────────────
-
-router.patch("/:id", async (req, res) => {
-    try {
-        const { title, status, priority, notes } = req.body;
-        
-        const [plan] = await db.update(treatmentPlans).set({
-            title: title ?? undefined,
-            status: status ?? undefined,
-            priority: priority ?? undefined,
-            notes: notes ?? undefined,
-            updatedAt: new Date()
-        })
-        .where(eq(treatmentPlans.id, req.params.id))
-        .returning();
-
-        if (!plan) return res.status(404).json({ error: "Treatment plan not found" });
-
-        res.json(plan);
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
+router.patch("/:id", (req, res) => {
+    const idx = demoTreatmentPlans.findIndex((p) => p.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ error: "Treatment plan not found" });
+    demoTreatmentPlans[idx] = { ...demoTreatmentPlans[idx], ...req.body };
+    res.json(demoTreatmentPlans[idx]);
 });
 
-// ─── Delete a treatment plan ────────────────────────────────────────
-
-router.delete("/:id", async (req, res) => {
-    try {
-        await db.delete(treatmentPlans).where(eq(treatmentPlans.id, req.params.id));
-        res.json({ success: true });
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
+router.delete("/:id", (req, res) => {
+    const idx = demoTreatmentPlans.findIndex((p) => p.id === req.params.id);
+    if (idx !== -1) demoTreatmentPlans.splice(idx, 1);
+    res.json({ success: true });
 });
 
-// ─── Add item to treatment plan ─────────────────────────────────────
-
-router.post("/:id/items", async (req, res) => {
-    try {
-        const { patientId, toothCode, surfaces, procedureCode, procedureName, description, estimatedCost, discount } = req.body;
-        
-        const [item] = await db.insert(treatmentPlanItems).values({
-            treatmentPlanId: req.params.id,
-            patientId,
-            toothCode,
-            surfaces,
-            procedureCode,
-            procedureName,
-            description,
-            estimatedCost: estimatedCost || "0",
-            discount: discount || "0",
-            status: "proposed"
-        }).returning();
-
-        // Update plan total
-        const plan = await db.query.treatmentPlans.findFirst({
-            where: eq(treatmentPlans.id, req.params.id),
-            with: { items: true }
-        });
-        
-        if (plan) {
-            const total = plan.items.reduce((acc: number, curr: any) => acc + (Number(curr.estimatedCost) - Number(curr.discount)), 0);
-            await db.update(treatmentPlans).set({ totalEstimatedCost: total.toString() }).where(eq(treatmentPlans.id, plan.id));
-        }
-
-        res.status(201).json(item);
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
+router.post("/:id/items", (req, res) => {
+    const plan = demoTreatmentPlans.find((p) => p.id === req.params.id);
+    if (!plan) return res.status(404).json({ error: "Treatment plan not found" });
+    const item = { id: uuidv4(), planId: req.params.id, status: "pending", sequenceOrder: plan.items.length + 1, ...req.body };
+    plan.items.push(item);
+    res.status(201).json(item);
 });
 
-// ─── Update item status ─────────────────────────────────────────────
-
-router.patch("/items/:itemId", async (req, res) => {
-    try {
-        const { status } = req.body;
-        
-        const [item] = await db.update(treatmentPlanItems).set({
-            status,
-            updatedAt: new Date()
-        })
-        .where(eq(treatmentPlanItems.id, req.params.itemId))
-        .returning();
-
-        if (!item) return res.status(404).json({ error: "Item not found" });
-
-        res.json(item);
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
+router.patch("/:id/items/:itemId", (req, res) => {
+    const plan = demoTreatmentPlans.find((p) => p.id === req.params.id);
+    if (!plan) return res.status(404).json({ error: "Treatment plan not found" });
+    const idx = plan.items.findIndex((i: any) => i.id === req.params.itemId);
+    if (idx === -1) return res.status(404).json({ error: "Item not found" });
+    plan.items[idx] = { ...plan.items[idx], ...req.body };
+    res.json(plan.items[idx]);
 });
 
-// ─── Delete an item ─────────────────────────────────────────────────
-
-router.delete("/items/:itemId", async (req, res) => {
-    try {
-        const item = await db.query.treatmentPlanItems.findFirst({
-            where: eq(treatmentPlanItems.id, req.params.itemId)
-        });
-        
-        if (!item) return res.status(404).json({ error: "Item not found" });
-        
-        await db.delete(treatmentPlanItems).where(eq(treatmentPlanItems.id, req.params.itemId));
-        
-        // Recalculate total
-        const plan = await db.query.treatmentPlans.findFirst({
-            where: eq(treatmentPlans.id, item.treatmentPlanId),
-            with: { items: true }
-        });
-        
-        if (plan) {
-            const total = plan.items.reduce((acc: number, curr: any) => acc + (Number(curr.estimatedCost) - Number(curr.discount)), 0);
-            await db.update(treatmentPlans).set({ totalEstimatedCost: total.toString() }).where(eq(treatmentPlans.id, plan.id));
-        }
-
-        res.json({ success: true });
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
+router.delete("/:id/items/:itemId", (req, res) => {
+    const plan = demoTreatmentPlans.find((p) => p.id === req.params.id);
+    if (!plan) return res.status(404).json({ error: "Treatment plan not found" });
+    plan.items = plan.items.filter((i: any) => i.id !== req.params.itemId);
+    res.json({ success: true });
 });
 
 export { router as treatmentPlanRouter };

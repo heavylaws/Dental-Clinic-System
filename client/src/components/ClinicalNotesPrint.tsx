@@ -18,9 +18,12 @@ export default function ClinicalNotesPrint({ patient, visit, diagnoses, onClose 
         staleTime: 60000,
     });
 
-    const clinicName = settings?.clinic_name || "DentalClinic";
-    const clinicSubtitle = settings?.clinic_subtitle || "Dermatology & Skin Care Center";
+    const clinicName = settings?.clinic_name || settings?.clinicName || "DentalClinic";
+    const clinicIcon = settings?.clinic_icon || "🦷";
+    const clinicSubtitle = settings?.clinic_subtitle || settings?.clinicSubtitle || "Dental Practice Management System";
     const clinicPhone = settings?.clinic_phone || "";
+    const notesTitle = settings?.clinical_notes_title || "Clinical Notes";
+    const signatureLabel = settings?.clinical_notes_signature_label || "Medical Practitioner";
 
     const handlePrint = () => {
         const content = printRef.current;
@@ -73,12 +76,12 @@ export default function ClinicalNotesPrint({ patient, visit, diagnoses, onClose 
                 <div ref={printRef} className="p-6 text-sm">
                     {/* Header */}
                     <div className="header" style={{ textAlign: "center", borderBottom: "2px double #059669", paddingBottom: "8px", marginBottom: "10px" }}>
-                        <div style={{ fontSize: "15pt", fontWeight: 800, color: "#047857" }}>🩺 {clinicName}</div>
+                        <div style={{ fontSize: "15pt", fontWeight: 800, color: "#047857" }}>{clinicIcon} {clinicName}</div>
                         <div style={{ fontSize: "8pt", color: "#64748b", marginTop: "2px" }}>
                             {clinicSubtitle}{clinicPhone ? ` • ${clinicPhone}` : ""}
                         </div>
                         <div style={{ fontSize: "9pt", fontWeight: 800, color: "#059669", textTransform: "uppercase", letterSpacing: "0.5px", marginTop: "5px" }}>
-                            Clinical Notes
+                            {notesTitle}
                         </div>
                     </div>
 
@@ -145,7 +148,7 @@ export default function ClinicalNotesPrint({ patient, visit, diagnoses, onClose 
                     {/* Signature */}
                     <div style={{ marginTop: "22px", display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
                         <div style={{ fontSize: "7pt", color: "#cbd5e1" }}>Generated: {new Date().toLocaleDateString()}</div>
-                        <div style={{ width: "130px", borderTop: "1px solid #94a3b8", paddingTop: "4px", fontSize: "7.5pt", color: "#64748b", textAlign: "center" }}>Medical Practitioner</div>
+                        <div style={{ width: "130px", borderTop: "1px solid #94a3b8", paddingTop: "4px", fontSize: "7.5pt", color: "#64748b", textAlign: "center" }}>{signatureLabel}</div>
                     </div>
                 </div>
             </div>

@@ -1,105 +1,50 @@
-import { Router } from "express";
-import { db } from "../../db/index.js";
-import { dentalCharts, toothRecords, dentalFindings } from "../../db/schema.js";
-import { eq, desc } from "drizzle-orm";
+﻿import { Router } from "express";
 import { requireAuth } from "../auth/index.js";
+import { v4 as uuidv4 } from "uuid";
 
 const router = Router();
 router.use(requireAuth);
 
-// ─── Get all dental charts for a patient ────────────────────────────
+// In-memory dental charts store
+const demoCharts: any[] = [];
 
-router.get("/patient/:patientId", async (req, res) => {
-    try {
-        const charts = await db.query.dentalCharts.findMany({
-            where: eq(dentalCharts.patientId, req.params.patientId),
-            orderBy: [desc(dentalCharts.chartDate)],
-        });
-        res.json(charts);
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
+function getOrCreateChart(patientId: string, userId: string) {
+    let chart = demoCharts.find((c) => c.patientId === patientId);
+    if (!chart) {
+        chart = {
+            id: uuidv4(),
+            patientId,
+            chartType: "existing",
+            dentistId: userId,
+            chartDate: new Date().toISOString(),
+            toothRecords: [],
+            dentalFindings: [],
+        };
+        demoCharts.push(chart);
     }
+    return chart;
+}
+
+router.get("/patient/:patientId", (req, res) => {
+    const charts = demoCharts.filter((c) => c.patientId === req.params.patientId);
+    res.json(charts);
 });
 
-// ─── Get active chart and tooth records for a patient ───────────────
-// This aggregates the latest state of teeth for the patient's main chart
-
-router.get("/patient/:patientId/active", async (req, res) => {
-    try {
-        // Find existing chart or create one
-        let chart = await db.query.dentalCharts.findFirst({
-            where: eq(dentalCharts.patientId, req.params.patientId),
-            orderBy: [desc(dentalCharts.chartDate)],
-            with: {
-                toothRecords: true,
-                dentalFindings: {
-                    where: eq(dentalFindings.status, "active")
-                }
-            }
-        });
-
-        if (!chart) {
-            const [newChart] = await db.insert(dentalCharts).values({
-                patientId: req.params.patientId,
-                chartType: "existing",
-                dentistId: (req.user as any)?.id,
-            }).returning();
-            
-            chart = { ...newChart, toothRecords: [], dentalFindings: [] } as any;
-        }
-
-        res.json(chart);
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
+router.get("/patient/:patientId/active", (req, res) => {
+    const chart = getOrCreateChart(req.params.patientId, (req.user as any)?.id);
+    res.json(chart);
 });
 
-// ─── Update tooth record status ─────────────────────────────────────
-
-router.patch("/:chartId/tooth/:toothCode", async (req, res) => {
-    try {
-        const { status, notationSystem, dentition, arch, quadrant, toothType } = req.body;
-        
-        // Find existing tooth record
-        const existing = await db.query.toothRecords.findFirst({
-            where: (t, { and, eq }) => and(
-                eq(t.chartId, req.params.chartId),
-                eq(t.toothCode, req.params.toothCode)
-            )
-        });
-
-        let record;
-        if (existing) {
-            [record] = await db.update(toothRecords).set({
-                status: status ?? existing.status,
-                updatedAt: new Date(),
-            })
-            .where(eq(toothRecords.id, existing.id))
-            .returning();
-        } else {
-            // Get patientId from chart
-            const chart = await db.query.dentalCharts.findFirst({
-                where: eq(dentalCharts.id, req.params.chartId)
-            });
-            if (!chart) return res.status(404).json({ error: "Chart not found" });
-
-            [record] = await db.insert(toothRecords).values({
-                chartId: req.params.chartId,
-                patientId: chart.patientId,
-                toothCode: req.params.toothCode,
-                status: status ?? "present",
-                notationSystem,
-                dentition,
-                arch,
-                quadrant,
-                toothType,
-            }).returning();
-        }
-
-        res.json(record);
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
+router.patch("/:chartId/tooth/:toothCode", (req, res) => {
+    const chart = demoCharts.find((c) => c.id === req.params.chartId);
+    if (!chart) return res.status(404).json({ error: "Chart not found" });
+    const existing = chart.toothRecords.find((t: any) => t.toothCode === req.params.toothCode);
+    if (existing) {
+        Object.assign(existing, req.body);
+    } else {
+        chart.toothRecords.push({ id: uuidv4(), chartId: req.params.chartId, toothCode: req.params.toothCode, ...req.body });
     }
+    res.json(chart);
 });
 
 export { router as dentalChartRouter };

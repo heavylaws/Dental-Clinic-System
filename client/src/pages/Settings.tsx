@@ -3,14 +3,24 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 
 const SETTING_FIELDS = [
-    { key: "clinic_name", label: "Clinic Name", type: "text", placeholder: "DermClinic" },
-    { key: "clinic_subtitle", label: "Clinic Subtitle", type: "text", placeholder: "Dermatology & Skin Care" },
+    { key: "clinic_name", label: "Clinic Name", type: "text", placeholder: "DentalClinic" },
+    { key: "clinic_icon", label: "Clinic Icon (emoji/text)", type: "text", placeholder: "🦷" },
+    { key: "clinic_subtitle", label: "Clinic Subtitle", type: "text", placeholder: "Dental Practice Management System" },
     { key: "clinic_phone", label: "Phone", type: "text", placeholder: "+964 xxx xxx xxxx" },
     { key: "clinic_address", label: "Address", type: "text", placeholder: "Baghdad, Iraq" },
     { key: "currency", label: "Currency", type: "text", placeholder: "USD" },
     { key: "working_hours_start", label: "Opening Time", type: "time", placeholder: "08:00" },
     { key: "working_hours_end", label: "Closing Time", type: "time", placeholder: "20:00" },
     { key: "appointment_duration", label: "Default Appointment Duration (min)", type: "number", placeholder: "30" },
+    { key: "prescription_title", label: "Prescription Print Title", type: "text", placeholder: "Prescription" },
+    { key: "prescription_signature_label", label: "Prescription Signature Label", type: "text", placeholder: "Doctor's Signature" },
+    { key: "lab_request_title", label: "Lab Request Print Title", type: "text", placeholder: "Laboratory Examination Request" },
+    { key: "lab_signature_label", label: "Lab Request Signature Label", type: "text", placeholder: "Medical Practitioner" },
+    { key: "clinical_notes_title", label: "Clinical Notes Print Title", type: "text", placeholder: "Clinical Notes" },
+    { key: "clinical_notes_signature_label", label: "Clinical Notes Signature Label", type: "text", placeholder: "Medical Practitioner" },
+    { key: "receipt_title", label: "Receipt Print Title", type: "text", placeholder: "RECEIPT" },
+    { key: "receipt_signature_label", label: "Receipt Signature Label", type: "text", placeholder: "Authorized Signature" },
+    { key: "receipt_footer_text", label: "Receipt Footer Text", type: "text", placeholder: "Thank you for choosing our clinic" },
 ];
 
 export default function Settings() {
@@ -322,6 +332,38 @@ export default function Settings() {
                             </div>
                         )}
                     </form>
+                </div>
+            )}
+
+            {/* ─── Data Backup (Demo Mode) ─── */}
+            {user?.role === "admin" && (
+                <div className="bg-white rounded-2xl shadow-sm border border-blue-200 p-6 mt-8">
+                    <h2 className="text-xl font-bold text-blue-700 mb-1">💾 Data Backup</h2>
+                    <p className="text-sm text-gray-500 mb-4">
+                        Download a full JSON snapshot of all current data (patients, visits, appointments, billing, recalls, referrals).
+                        Store this file safely — it can be used to review data or migrate to a permanent database.
+                    </p>
+                    <a
+                        href="/api/settings/backup"
+                        download
+                        className="inline-block px-6 py-2.5 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition"
+                    >
+                        ⬇️ Download Backup JSON
+                    </a>
+                    <div className="mt-6 border-t border-gray-100 pt-5">
+                        <h3 className="font-bold text-gray-700 mb-3">📋 Moving to PostgreSQL (Permanent Storage)</h3>
+                        <ol className="text-sm text-gray-600 space-y-2 list-decimal list-inside">
+                            <li>Install PostgreSQL on this machine — <span className="font-mono text-xs bg-gray-100 px-1 rounded">winget install -e --id PostgreSQL.PostgreSQL</span></li>
+                            <li>Create the database: <span className="font-mono text-xs bg-gray-100 px-1 rounded">createdb dentalclinic</span></li>
+                            <li>Set the env variable: <span className="font-mono text-xs bg-gray-100 px-1 rounded">DATABASE_URL=postgresql://postgres:postgres@localhost:5432/dentalclinic</span></li>
+                            <li>Run migrations: <span className="font-mono text-xs bg-gray-100 px-1 rounded">npm run db:migrate</span></li>
+                            <li>The app auto-saves clinic data snapshots to PostgreSQL when DATABASE_URL is set</li>
+                        </ol>
+                        <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-700">
+                            ⚠️ Currently running in <strong>demo/in-memory mode</strong> — data resets on server restart.
+                            Set <code>DATABASE_URL</code> to switch to persistent PostgreSQL storage.
+                        </div>
+                    </div>
                 </div>
             )}
         </div>

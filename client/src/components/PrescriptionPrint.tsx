@@ -19,9 +19,12 @@ export default function PrescriptionPrint({ patient, visit, prescriptions, diagn
         staleTime: 60000,
     });
 
-    const clinicName = settings?.clinic_name || "DentalClinic";
-    const clinicSubtitle = settings?.clinic_subtitle || "Dermatology & Skin Care Center";
+    const clinicName = settings?.clinic_name || settings?.clinicName || "DentalClinic";
+    const clinicIcon = settings?.clinic_icon || "🦷";
+    const clinicSubtitle = settings?.clinic_subtitle || settings?.clinicSubtitle || "Dental Practice Management System";
     const clinicPhone = settings?.clinic_phone || "";
+    const prescriptionTitle = settings?.prescription_title || "Prescription";
+    const signatureLabel = settings?.prescription_signature_label || "Doctor's Signature";
 
     const handlePrint = () => {
         const content = printRef.current;
@@ -78,7 +81,7 @@ export default function PrescriptionPrint({ patient, visit, prescriptions, diagn
                 <div ref={printRef} className="p-6 text-sm">
                     {/* Header */}
                     <div className="header" style={{ textAlign: "center", borderBottom: "2px double #2563eb", paddingBottom: "8px", marginBottom: "10px" }}>
-                        <div className="clinic-name" style={{ fontSize: "15pt", fontWeight: 800, color: "#1e40af" }}>🩺 {clinicName}</div>
+                        <div className="clinic-name" style={{ fontSize: "15pt", fontWeight: 800, color: "#1e40af" }}>{clinicIcon} {clinicName}</div>
                         <div className="clinic-sub" style={{ fontSize: "8pt", color: "#64748b", marginTop: "2px" }}>
                             {clinicSubtitle}{clinicPhone ? ` • ${clinicPhone}` : ""}
                         </div>
@@ -113,7 +116,7 @@ export default function PrescriptionPrint({ patient, visit, prescriptions, diagn
                     )}
 
                     {/* Prescriptions */}
-                    <div style={{ fontSize: "8.5pt", fontWeight: 800, color: "#1e40af", textTransform: "uppercase", paddingBottom: "3px", borderBottom: "1px solid #dbeafe", marginBottom: "7px" }}>Prescription</div>
+                    <div style={{ fontSize: "8.5pt", fontWeight: 800, color: "#1e40af", textTransform: "uppercase", paddingBottom: "3px", borderBottom: "1px solid #dbeafe", marginBottom: "7px" }}>{prescriptionTitle}</div>
                     {prescriptions.map((rx: any, idx: number) => (
                         <div key={rx.id || idx} style={{ display: "flex", gap: "8px", padding: "7px 9px", border: "1px solid #e2e8f0", borderRadius: "6px", marginBottom: "6px", background: idx % 2 === 0 ? "#fafbff" : "#fff", pageBreakInside: "avoid" }}>
                             <div style={{ fontSize: "14pt", fontWeight: 800, color: "#bfdbfe", minWidth: "20px", lineHeight: 1 }}>{idx + 1}</div>
@@ -132,7 +135,7 @@ export default function PrescriptionPrint({ patient, visit, prescriptions, diagn
                     {/* Signature */}
                     <div style={{ marginTop: "22px", display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
                         <div style={{ fontSize: "7.5pt", color: "#cbd5e1" }}>Visit #{visit?.visitNumber}</div>
-                        <div style={{ width: "130px", borderTop: "1px solid #94a3b8", paddingTop: "4px", fontSize: "7.5pt", color: "#64748b", textAlign: "center" }}>Doctor's Signature</div>
+                        <div style={{ width: "130px", borderTop: "1px solid #94a3b8", paddingTop: "4px", fontSize: "7.5pt", color: "#64748b", textAlign: "center" }}>{signatureLabel}</div>
                     </div>
                 </div>
             </div>

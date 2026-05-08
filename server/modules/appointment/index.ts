@@ -1,131 +1,83 @@
-import { Router } from "express";
-import { db } from "../../db/index.js";
-import { appointments, patients, users } from "../../db/schema.js";
-import { eq, and, gte, lte, sql, desc } from "drizzle-orm";
-import { insertAppointmentSchema } from "../../../shared/types.js";
+﻿import { Router } from "express";
 import { requireAuth } from "../auth/index.js";
+import { demoAppointments, demoPatients } from "../../demo-store.js";
+import { v4 as uuidv4 } from "uuid";
+
+const DOCTOR_NAMES: Record<string, string> = {
+    "2": "Dr. Mohammed Al-Mansouri",
+    "4": "Dr. Layla Boujdaria",
+};
 
 const router = Router();
 router.use(requireAuth);
 
-// ─── List appointments by date (or date range) ─────────────────────
+// List appointments by date or range (optional doctorId filter)
+router.get("/", (req, res) => {
+    const { date, from, to, doctorId } = req.query as Record<string, string>;
+    const dateFrom = date || from || new Date().toISOString().split("T")[0];
+    const dateTo = date || to || dateFrom;
 
-router.get("/", async (req, res) => {
-    try {
-        const { date, from, to } = req.query as Record<string, string>;
-
-        let dateFrom = date || from || new Date().toISOString().split("T")[0];
-        let dateTo = date || to || dateFrom;
-
-        const result = await db
-            .select({
-                appointment: appointments,
-                patientFirstName: patients.firstName,
-                patientLastName: patients.lastName,
-                patientPhone: patients.phone,
-                doctorName: users.displayName,
-            })
-            .from(appointments)
-            .leftJoin(patients, eq(appointments.patientId, patients.id))
-            .leftJoin(users, eq(appointments.doctorId, users.id))
-            .where(
-                and(
-                    gte(appointments.appointmentDate, dateFrom),
-                    lte(appointments.appointmentDate, dateTo)
-                )
-            )
-            .orderBy(appointments.appointmentDate, appointments.timeSlot);
-
-        const flattened = result.map(({ appointment, patientFirstName, patientLastName, patientPhone, doctorName }) => ({
-            ...appointment,
-            patientName: `${patientFirstName || ""} ${patientLastName || ""}`.trim(),
-            patientPhone,
-            doctorName,
-        }));
-
-        res.json(flattened);
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// ─── Get upcoming appointments for a patient ────────────────────────
-
-router.get("/patient/:patientId", async (req, res) => {
-    try {
-        const today = new Date().toISOString().split("T")[0];
-        const result = await db.query.appointments.findMany({
-            where: and(
-                eq(appointments.patientId, req.params.patientId),
-                gte(appointments.appointmentDate, today)
-            ),
-            orderBy: [appointments.appointmentDate, appointments.timeSlot],
+    const results = demoAppointments
+        .filter((a) => {
+            if (a.appointmentDate < dateFrom || a.appointmentDate > dateTo) return false;
+            if (doctorId && a.doctorId !== doctorId) return false;
+            return true;
+        })
+        .map((a) => {
+            const pt = demoPatients.find((p) => p.id === a.patientId);
+            return {
+                ...a,
+                patientName: pt ? `${pt.firstName} ${pt.lastName}` : "",
+                patientPhone: pt ? pt.phone : null,
+                doctorName: DOCTOR_NAMES[a.doctorId] || "Unknown Doctor",
+            };
+        })
+        .sort((a, b) => {
+            if (a.appointmentDate !== b.appointmentDate) return a.appointmentDate.localeCompare(b.appointmentDate);
+            return (a.timeSlot || "").localeCompare(b.timeSlot || "");
         });
-        res.json(result);
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
+
+    res.json(results);
 });
 
-// ─── Create appointment ─────────────────────────────────────────────
-
-router.post("/", async (req, res) => {
-    try {
-        const data = insertAppointmentSchema.parse(req.body);
-        const [appointment] = await db.insert(appointments).values(data).returning();
-        res.status(201).json(appointment);
-    } catch (error: any) {
-        if (error.name === "ZodError") return res.status(400).json({ error: error.errors });
-        res.status(500).json({ error: error.message });
-    }
+// All doctors for the appointments calendar
+router.get("/doctors", (_req, res) => {
+    res.json(Object.entries(DOCTOR_NAMES).map(([id, name]) => ({ id, name })));
 });
 
-// ─── Update appointment ─────────────────────────────────────────────
-
-router.put("/:id", async (req, res) => {
-    try {
-        const data = insertAppointmentSchema.partial().parse(req.body);
-        const [appointment] = await db
-            .update(appointments)
-            .set(data)
-            .where(eq(appointments.id, req.params.id))
-            .returning();
-
-        if (!appointment) return res.status(404).json({ error: "Appointment not found" });
-        res.json(appointment);
-    } catch (error: any) {
-        if (error.name === "ZodError") return res.status(400).json({ error: error.errors });
-        res.status(500).json({ error: error.message });
-    }
+// Upcoming appointments for a patient
+router.get("/patient/:patientId", (req, res) => {
+    const today = new Date().toISOString().split("T")[0];
+    const results = demoAppointments
+        .filter((a) => a.patientId === req.params.patientId && a.appointmentDate >= today)
+        .sort((a, b) => {
+            if (a.appointmentDate !== b.appointmentDate) return a.appointmentDate.localeCompare(b.appointmentDate);
+            return (a.timeSlot || "").localeCompare(b.timeSlot || "");
+        });
+    res.json(results);
 });
 
-// ─── Update appointment status ──────────────────────────────────────
-
-router.patch("/:id/status", async (req, res) => {
-    try {
-        const { status } = req.body;
-        const [appointment] = await db
-            .update(appointments)
-            .set({ status })
-            .where(eq(appointments.id, req.params.id))
-            .returning();
-
-        if (!appointment) return res.status(404).json({ error: "Appointment not found" });
-        res.json(appointment);
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
+// Create appointment
+router.post("/", (req, res) => {
+    const appt = { id: uuidv4(), status: "scheduled", createdAt: new Date().toISOString(), ...req.body };
+    demoAppointments.push(appt);
+    res.status(201).json(appt);
 });
 
-// ─── Delete appointment ─────────────────────────────────────────────
+// Update appointment
+router.put("/:id", (req, res) => {
+    const idx = demoAppointments.findIndex((a) => a.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ error: "Appointment not found" });
+    demoAppointments[idx] = { ...demoAppointments[idx], ...req.body };
+    res.json(demoAppointments[idx]);
+});
 
-router.delete("/:id", async (req, res) => {
-    try {
-        await db.delete(appointments).where(eq(appointments.id, req.params.id));
-        res.json({ success: true });
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
+// Delete appointment
+router.delete("/:id", (req, res) => {
+    const idx = demoAppointments.findIndex((a) => a.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ error: "Appointment not found" });
+    demoAppointments.splice(idx, 1);
+    res.json({ success: true });
 });
 
 export { router as appointmentRouter };

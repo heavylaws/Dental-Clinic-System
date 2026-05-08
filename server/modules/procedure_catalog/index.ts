@@ -1,58 +1,32 @@
-import { Router } from "express";
-import { db } from "../../db/index.js";
-import { dentalProcedureCatalog } from "../../db/schema.js";
-import { eq, ilike } from "drizzle-orm";
+﻿import { Router } from "express";
 import { requireAuth } from "../auth/index.js";
+import { demoProcedureCatalog } from "../../demo-store.js";
+import { v4 as uuidv4 } from "uuid";
 
 const router = Router();
 router.use(requireAuth);
 
-// ─── Get all procedures (or filter by category) ─────────────────────
-
-router.get("/", async (req, res) => {
-    try {
-        const { category } = req.query;
-        let query = db.select().from(dentalProcedureCatalog).where(eq(dentalProcedureCatalog.isActive, true));
-        
-        if (category) {
-            query = query.where(eq(dentalProcedureCatalog.category, category as string));
-        }
-
-        const catalog = await query;
-        res.json(catalog);
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
+router.get("/", (_req, res) => {
+    res.json(demoProcedureCatalog.filter((p) => p.isActive));
 });
 
-// ─── Search procedures ──────────────────────────────────────────────
-
-router.get("/search", async (req, res) => {
-    try {
-        const { q } = req.query;
-        if (!q || typeof q !== "string") return res.json([]);
-
-        const results = await db.select()
-            .from(dentalProcedureCatalog)
-            .where(ilike(dentalProcedureCatalog.name, `%${q}%`))
-            .limit(10);
-            
-        res.json(results);
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
+router.post("/", (req, res) => {
+    const proc = { id: uuidv4(), isActive: true, ...req.body };
+    demoProcedureCatalog.push(proc);
+    res.status(201).json(proc);
 });
 
-// ─── Create a catalog procedure (Admin) ─────────────────────────────
+router.put("/:id", (req, res) => {
+    const idx = demoProcedureCatalog.findIndex((p) => p.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ error: "Procedure not found" });
+    demoProcedureCatalog[idx] = { ...demoProcedureCatalog[idx], ...req.body };
+    res.json(demoProcedureCatalog[idx]);
+});
 
-router.post("/", async (req, res) => {
-    try {
-        const data = req.body;
-        const [proc] = await db.insert(dentalProcedureCatalog).values(data).returning();
-        res.status(201).json(proc);
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
+router.delete("/:id", (req, res) => {
+    const idx = demoProcedureCatalog.findIndex((p) => p.id === req.params.id);
+    if (idx !== -1) demoProcedureCatalog[idx].isActive = false;
+    res.json({ success: true });
 });
 
 export { router as procedureCatalogRouter };

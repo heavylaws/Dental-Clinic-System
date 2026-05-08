@@ -4,10 +4,12 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import AutocompleteInput from "../components/AutocompleteInput";
 import BillVisitDialog from "../components/BillVisitDialog";
-import { Pencil, Banknote, Printer, Camera as CameraIcon, Beaker, Pill, Check, X } from "lucide-react";
+import { Pencil, Banknote, Printer, Camera as CameraIcon, Beaker, Pill, Check, X, Receipt } from "lucide-react";
 import PrescriptionPrint from "../components/PrescriptionPrint";
 import LabPrint from "../components/LabPrint";
 import ClinicalNotesPrint from "../components/ClinicalNotesPrint";
+import ReceiptPrint from "../components/ReceiptPrint";
+import ReferralPrint from "../components/ReferralPrint";
 import CameraCapture from "../components/CameraCapture";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { DentalChart } from "../components/patient/DentalChart";
@@ -30,6 +32,8 @@ export default function PatientFile({ user }: PatientFileProps) {
     const [printVisit, setPrintVisit] = useState<any>(null);
     const [printLabVisit, setPrintLabVisit] = useState<any>(null);
     const [printNotesVisit, setPrintNotesVisit] = useState<any>(null);
+    const [printReceiptVisit, setPrintReceiptVisit] = useState<any>(null);
+    const [printReferral, setPrintReferral] = useState<any>(null);
     const [showEditPatient, setShowEditPatient] = useState(false);
 
     // ─── Queries ──────────────────────────────────────────────────────
@@ -136,6 +140,9 @@ export default function PatientFile({ user }: PatientFileProps) {
                                 <InfoRow label="Name" value={`${patient.firstName} ${patient.lastName}`} />
                                 <InfoRow label="Father" value={patient.fatherName} />
                                 <InfoRow label="Gender" value={patient.gender} />
+                                <InfoRow label="Date of Birth" value={patient.dateOfBirth
+                                    ? `${new Date(patient.dateOfBirth).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })} (${Math.floor((Date.now() - new Date(patient.dateOfBirth).getTime()) / (365.25 * 24 * 3600 * 1000))} yrs)`
+                                    : undefined} />
                                 <InfoRow label="Phone" value={patient.phone} />
                                 <InfoRow label="City" value={patient.city} />
                                 <InfoRow label="Marital Status" value={patient.maritalStatus} />
@@ -299,6 +306,17 @@ export default function PatientFile({ user }: PatientFileProps) {
                                                                         title="Collect Payment"
                                                                     >
                                                                         <Banknote size={18} />
+                                                                    </button>
+                                                                )}
+
+                                                                {/* Print Receipt Button */}
+                                                                {visit.billing && (
+                                                                    <button
+                                                                        onClick={(e) => { e.stopPropagation(); setPrintReceiptVisit(visit); }}
+                                                                        className="p-2 bg-amber-100 text-amber-600 rounded-lg hover:bg-amber-200 transition"
+                                                                        title="Print Receipt"
+                                                                    >
+                                                                        <Receipt size={18} />
                                                                     </button>
                                                                 )}
 
@@ -484,6 +502,29 @@ export default function PatientFile({ user }: PatientFileProps) {
                         labOrders={printLabVisit.labOrders || []}
                         diagnoses={printLabVisit.diagnoses || []}
                         onClose={() => setPrintLabVisit(null)}
+                    />
+                )
+            }
+
+            {/* Referral Print Dialog */}
+            {
+                printReferral && patient && (
+                    <ReferralPrint
+                        patient={patient}
+                        referral={printReferral}
+                        onClose={() => setPrintReferral(null)}
+                    />
+                )
+            }
+
+            {/* Receipt Print Dialog */}
+            {
+                printReceiptVisit && patient && (
+                    <ReceiptPrint
+                        patient={patient}
+                        visit={printReceiptVisit}
+                        billing={printReceiptVisit.billing}
+                        onClose={() => setPrintReceiptVisit(null)}
                     />
                 )
             }
@@ -1011,9 +1052,24 @@ function VisitForm({
                             {addedLabs.map((lab) => (
                                 <span
                                     key={lab.id}
-                                    className="inline-flex items-center gap-2 bg-warm-100 text-warm-500 px-4 py-2 rounded-full text-lg font-semibold"
+                                    className="inline-flex items-center gap-2 bg-warm-100 text-warm-500 px-3 py-2 rounded-full text-sm font-semibold"
                                 >
-                                    {lab.testName}
+                                    🧪 {lab.testName}
+                                    <select
+                                        value={lab.status || "ordered"}
+                                        onChange={(e) => {
+                                            api.visits.updateLabOrder(visitId, lab.id, { status: e.target.value });
+                                            setAddedLabs((prev) => prev.map((l) => l.id === lab.id ? { ...l, status: e.target.value } : l));
+                                        }}
+                                        className="text-xs border-0 bg-warm-100 text-warm-700 font-bold rounded-lg px-1 py-0.5 outline-none focus:ring-1 focus:ring-warm-400"
+                                        onClick={(e) => e.stopPropagation()}
+                                    >
+                                        <option value="ordered">Ordered</option>
+                                        <option value="sample_collected">Sample Collected</option>
+                                        <option value="processing">Processing</option>
+                                        <option value="results_ready">Results Ready</option>
+                                        <option value="reviewed">Reviewed</option>
+                                    </select>
                                     <button
                                         onClick={() => deleteLab(lab.id)}
                                         className="text-warm-400 hover:text-danger-500 text-xl"
@@ -1159,6 +1215,11 @@ function VisitForm({
                             {addedReferrals.map((ref) => (
                                 <span key={ref.id} className="inline-flex items-center gap-2 bg-indigo-100 text-indigo-700 px-4 py-2 rounded-full text-sm font-semibold">
                                     🔄 {ref.referredTo} {ref.specialty ? `(${ref.specialty})` : ""}
+                                    <button
+                                        onClick={() => setPrintReferral(ref)}
+                                        className="text-indigo-500 hover:text-indigo-700 text-sm"
+                                        title="Print referral letter"
+                                    >🖨️</button>
                                     <button
                                         onClick={async () => { await api.referrals.delete(ref.id); setAddedReferrals((prev) => prev.filter((r) => r.id !== ref.id)); }}
                                         className="text-indigo-400 hover:text-danger-500 text-lg"

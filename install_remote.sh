@@ -7,18 +7,18 @@ sudo apt-get install -y nodejs npm postgresql postgresql-contrib curl
 
 # Setup database
 sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD 'postgres';"
-sudo -u postgres psql -c "CREATE DATABASE dermclinic OWNER postgres;" || true
+sudo -u postgres psql -c "CREATE DATABASE dentalclinic OWNER postgres;" || true
 
 # Change to the script's directory automatically
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 cd "$SCRIPT_DIR"
 
 # Restore database dump if it exists
-if [ -f "$SCRIPT_DIR/dermclinic.dump" ]; then
-    echo "Restoring database from dermclinic.dump..."
-    sudo -u postgres pg_restore -d dermclinic -1 "$SCRIPT_DIR/dermclinic.dump" || true
+if [ -f "$SCRIPT_DIR/dentalclinic.dump" ]; then
+    echo "Restoring database from dentalclinic.dump..."
+    sudo -u postgres pg_restore -d dentalclinic -1 "$SCRIPT_DIR/dentalclinic.dump" || true
 else
-    echo "Warning: dermclinic.dump not found in $SCRIPT_DIR. Skipping database restore."
+    echo "Warning: dentalclinic.dump not found in $SCRIPT_DIR. Skipping database restore."
 fi
 
 # Install Node dependencies
@@ -26,6 +26,6 @@ npm install
 sudo npm install -g pm2
 
 # Start the application via PM2
-pm2 start npm --name "dermclinic" -- run dev
+pm2 start npm --name "dentalclinic" -- run dev
 pm2 save
 pm2 startup

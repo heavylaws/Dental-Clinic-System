@@ -14,13 +14,13 @@ pause
 
 echo Setting up database...
 set PGPASSWORD=postgres
-psql -U postgres -c "CREATE DATABASE dermclinic OWNER postgres;"
+psql -U postgres -c "CREATE DATABASE dentalclinic OWNER postgres;"
 
-if exist "dermclinic.dump" (
+if exist "dentalclinic.dump" (
     echo Restoring database dump...
-    pg_restore -U postgres -d dermclinic -1 "dermclinic.dump"
+    pg_restore -U postgres -d dentalclinic -1 "dentalclinic.dump"
 ) else (
-    echo Warning: dermclinic.dump not found. Skipping database restore.
+    echo Warning: dentalclinic.dump not found. Skipping database restore.
 )
 
 echo.

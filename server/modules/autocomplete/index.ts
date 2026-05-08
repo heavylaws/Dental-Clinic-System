@@ -1,107 +1,47 @@
-import { Router } from "express";
-import { db } from "../../db/index.js";
-import { medicalTerms } from "../../db/schema.js";
-import { eq, and, ilike, desc, sql } from "drizzle-orm";
-import { autocompleteQuerySchema } from "../../../shared/types.js";
+﻿import { Router } from "express";
 import { requireAuth } from "../auth/index.js";
+import { demoTerms } from "../../demo-store.js";
 
 const router = Router();
 router.use(requireAuth);
 
-// ─── Autocomplete query ─────────────────────────────────────────────
+// Autocomplete query
+router.get("/", (req, res) => {
+    const category = (req.query.category as string) || "";
+    const query = ((req.query.q as string) || "").toLowerCase();
+    const limit = parseInt(req.query.limit as string) || 8;
 
-router.get("/", async (req, res) => {
-    try {
-        const { category, query, limit } = autocompleteQuerySchema.parse({
-            category: req.query.category,
-            query: req.query.q,
-            limit: req.query.limit ? parseInt(req.query.limit as string) : 8,
-        });
+    const results = demoTerms
+        .filter((t) => t.category === category && t.term.toLowerCase().includes(query))
+        .sort((a, b) => b.usageCount - a.usageCount)
+        .slice(0, limit)
+        .map(({ id, term, usageCount, category }) => ({ id, term, usageCount, category }));
 
-        // Use ILIKE for pattern matching (pg_trgm for fuzzy matching can be added later)
-        const results = await db
-            .select({
-                id: medicalTerms.id,
-                term: medicalTerms.term,
-                usageCount: medicalTerms.usageCount,
-                category: medicalTerms.category,
-            })
-            .from(medicalTerms)
-            .where(
-                and(
-                    eq(medicalTerms.category, category),
-                    ilike(medicalTerms.term, `%${query}%`)
-                )
-            )
-            .orderBy(desc(medicalTerms.usageCount))
-            .limit(limit);
-
-        res.json(results);
-    } catch (error: any) {
-        if (error.name === "ZodError") return res.status(400).json({ error: error.errors });
-        res.status(500).json({ error: error.message });
-    }
+    res.json(results);
 });
 
-// ─── Get popular terms by category ──────────────────────────────────
+// Popular terms by category
+router.get("/popular/:category", (req, res) => {
+    const results = demoTerms
+        .filter((t) => t.category === req.params.category)
+        .sort((a, b) => b.usageCount - a.usageCount)
+        .slice(0, 20)
+        .map(({ term, usageCount }) => ({ term, usageCount }));
 
-router.get("/popular/:category", async (req, res) => {
-    try {
-        const results = await db
-            .select({
-                term: medicalTerms.term,
-                usageCount: medicalTerms.usageCount,
-            })
-            .from(medicalTerms)
-            .where(eq(medicalTerms.category, req.params.category))
-            .orderBy(desc(medicalTerms.usageCount))
-            .limit(20);
-
-        res.json(results);
-    } catch (error: any) {
-        res.status(500).json({ error: error.message });
-    }
+    res.json(results);
 });
 
-// ─── Learn a term (exported for use by other modules) ───────────────
-
+// Learn a term (no-op in demo mode)
 export async function learnTerm(category: string, term: string) {
-    const normalizedTerm = term.trim().toLowerCase();
-    if (!normalizedTerm || normalizedTerm.length < 2) return;
-
-    try {
-        // Check if term exists
-        const [existing] = await db
-            .select()
-            .from(medicalTerms)
-            .where(
-                and(
-                    eq(medicalTerms.category, category),
-                    sql`LOWER(${medicalTerms.term}) = ${normalizedTerm}`
-                )
-            )
-            .limit(1);
-
-        if (existing) {
-            // Increment usage count
-            await db
-                .update(medicalTerms)
-                .set({
-                    usageCount: existing.usageCount + 1,
-                    lastUsed: new Date(),
-                })
-                .where(eq(medicalTerms.id, existing.id));
-        } else {
-            // Insert new term (preserve original casing)
-            await db.insert(medicalTerms).values({
-                category,
-                term: term.trim(),
-                usageCount: 1,
-            });
-        }
-    } catch (error) {
-        // Non-critical: log but don't fail the request
-        console.error("Failed to learn term:", error);
+    const normalized = term.trim().toLowerCase();
+    if (!normalized || normalized.length < 2) return;
+    const existing = demoTerms.find(
+        (t) => t.category === category && t.term.toLowerCase() === normalized
+    );
+    if (existing) {
+        existing.usageCount += 1;
+    } else {
+        demoTerms.push({ id: `t${Date.now()}`, category, term: term.trim(), usageCount: 1 });
     }
 }
 
