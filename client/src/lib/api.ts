@@ -392,6 +392,51 @@ export const api = {
             request(`/referrals/${id}`, { method: "DELETE" }),
     },
 
+    // ─── Dashboard ────────────────────────────────────────────────────
+
+    dashboard: {
+        summary: () =>
+            request<{
+                today: {
+                    date: string;
+                    revenue: number;
+                    billed: number;
+                    outstanding: number;
+                    appointments: number;
+                    completedAppointments: number;
+                    noShows: number;
+                    noShowRate: number;
+                    activePatients30d: number;
+                    visits: number;
+                };
+                revenueTrend: Array<{ date: string; revenue: number; billed: number }>;
+                appointmentsToday: Array<{
+                    id: string;
+                    patientId: string;
+                    patientName: string;
+                    patientPhone: string | null;
+                    doctorId: string | null;
+                    doctorName: string;
+                    appointmentDate: string;
+                    timeSlot: string;
+                    duration: number | null;
+                    type: string;
+                    status: string;
+                }>;
+                unpaidInvoices: Array<{
+                    id: string;
+                    visitId: string;
+                    patientId: string | null;
+                    patientName: string;
+                    totalAmount: number;
+                    paidAmount: number;
+                    balance: number;
+                    status: string;
+                    createdAt: string;
+                }>;
+            }>("/dashboard/summary"),
+    },
+
     // ─── AI ───────────────────────────────────────────────────────────
 
     ai: {
