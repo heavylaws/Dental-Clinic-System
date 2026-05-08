@@ -242,6 +242,36 @@ export const api = {
         },
         topDiagnoses: () => request<any[]>("/reports/top-diagnoses"),
         topMedications: () => request<any[]>("/reports/top-medications"),
+        ownerSummary: (from: string, to: string, groupBy: "daily" | "weekly" | "monthly" = "daily") => {
+            const params = new URLSearchParams({ from, to, groupBy });
+            return request<{
+                range: { from: string; to: string; groupBy: "daily" | "weekly" | "monthly" };
+                totals: {
+                    billed: number;
+                    collected: number;
+                    outstanding: number;
+                    visitCount: number;
+                    procedureCount: number;
+                    patientCount: number;
+                    averageTicket: number;
+                    collectionRate: number;
+                };
+                revenueTrend: Array<{ period: string; billed: number; collected: number; visits: number }>;
+                doctorProduction: Array<{
+                    doctorId: string;
+                    doctorName: string;
+                    billed: number;
+                    collected: number;
+                    outstanding: number;
+                    visitCount: number;
+                    procedureCount: number;
+                    patientCount: number;
+                    averageTicket: number;
+                }>;
+                topProcedures: Array<{ name: string; category: string; revenue: number; count: number }>;
+                patientGrowth: Array<{ period: string; newPatients: number; activePatients: number }>;
+            }>(`/reports/owner-summary?${params}`);
+        },
         prescriptions: (startDate: string, endDate: string, medication?: string) => {
             const params = new URLSearchParams();
             params.set("from", startDate);

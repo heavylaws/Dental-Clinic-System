@@ -94,10 +94,87 @@ Verification:
 - **Timezone consistency**: `server/modules/dashboard/index.ts` now uses UTC `YYYY-MM-DD` (`d.toISOString().split("T")[0]`, via small helper `utcDateStr`) for all date comparisons, matching the existing `demoAppointments` and `appointment` module convention. This eliminates a 4-hour daily window where today's appointments could be mis-bucketed in non-UTC server timezones.
 
 ### Known Limitations
-- Server `tsc` build still fails due to pre-existing `demoVisits` references in `server/modules/report/index.ts`. Not in Phase 2 scope.
+- ~~Server `tsc` build still fails due to pre-existing `demoVisits` references in `server/modules/report/index.ts`. Not in Phase 2 scope.~~ — **Resolved in Phase 3 pre-flight**.
 - Active patients count uses in-memory demo data; resets when persistence is in-memory mode.
 - Chart is a single line (revenue only); billed line not drawn to keep visualization minimal.
 - No filtering/date-range selector on the dashboard yet (kept for a later phase).
+
+---
+
+## Phase 3 — Reports With Charts + Doctor Production
+
+**Status:** ✅ COMPLETE
+
+### Goal
+Turn the Reports page into a premium clinic-owner analytics page that answers: how much money did the clinic make, which doctor produced the most, which procedures generate the most revenue, are visits/patients growing, and can the owner export a clean report.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `server/modules/report/index.ts` | **Pre-flight fix**: replaced bare `demoVisits` references with `getLiveDemoVisits()` (resolves prior `TS2304` errors). **Added** `GET /api/reports/owner-summary` with totals, revenue trend, doctor production, top procedures, and patient growth |
+| `client/src/lib/api.ts` | Added `api.reports.ownerSummary(from, to, groupBy)` with full TypeScript response type |
+| `client/src/pages/Reports.tsx` | Rewritten: tabbed UI (Owner Analytics + Prescription Report). Owner tab includes filter bar (from/to/groupBy), KPI cards, custom SVG revenue trend chart, sortable doctor production table, top procedures bar list, patient growth chart, CSV export, and Print/PDF export. Prescription Report tab fully preserved (date range, medication filter, sortable detail table, summary stats). Admin bulk-export buttons preserved on the prescription tab |
+| `PRODUCT_PHASES.md` | This entry |
+
+### New Endpoint
+
+`GET /api/reports/owner-summary?from=YYYY-MM-DD&to=YYYY-MM-DD&groupBy=daily|weekly|monthly` (auth required)
+
+Returns:
+- `range` — echo of `{from, to, groupBy}`
+- `totals` — billed, collected, outstanding, visitCount, procedureCount, patientCount, averageTicket, collectionRate
+- `revenueTrend` — every period in range (zeroes included), `{period, billed, collected, visits}`
+- `doctorProduction` — sorted by collected desc; falls back to `Unassigned / Clinic` bucket if no doctors found
+- `topProcedures` — top 10 by revenue, `{name, category, revenue, count}`
+- `patientGrowth` — per period, `{period, newPatients, activePatients}` (newPatients computed from each patient's all-time first visit)
+
+Date handling uses UTC `YYYY-MM-DD` for daily/weekly buckets and `YYYY-MM` for monthly, matching Phase 2 conventions. Numbers parsed defensively.
+
+### Desktop UI Summary
+
+- Tabs: **Owner Analytics** (default) and **Prescription Report**.
+- Owner tab filter bar: From/To date pickers, Group By selector (daily/weekly/monthly), Refresh, Export CSV, Print/PDF buttons.
+- 6 KPI cards: Collected, Billed, Outstanding, Collection Rate, Visits, Avg Ticket.
+- Custom SVG line chart with billed (dashed sky) vs collected (solid emerald + gradient area), Y-axis ticks, hover tooltips, period labels.
+- Doctor Production table with click-to-sort columns (collected, billed, visits, patients, avg ticket).
+- Top Procedures: ranked horizontal bar list with category labels and counts.
+- Patient Growth: dual-bar mini chart (active vs new) per period.
+- Skeleton loaders + non-blocking error banner.
+
+### Export Behavior
+
+**CSV** (`Export CSV` button): generates a single multi-section CSV with BOM:
+- `# Totals`
+- `# Revenue Trend`
+- `# Doctor Production`
+- `# Top Procedures`
+- `# Patient Growth`
+
+Filename: `clinic-owner-report-<from>-to-<to>.csv`. Implemented as a browser-side `Blob` download — **no dependencies added**.
+
+**Print/PDF** (`🖨 Print / PDF` button): opens a new window with a clean printable HTML report (header, KPI grid, doctor table, top procedures table, revenue trend table, patient growth table) and a top-right Print button. The user can pick "Save as PDF" from the system print dialog. **No PDF library added**. If pop-ups are blocked, an alert prompts the user.
+
+### Mobile Regression Note
+
+- `client/src/mobile/pages/MobileReports.tsx` was **not modified**.
+- Existing mobile API methods (`api.reports.daily`, `api.reports.prescriptions`) are unchanged.
+- `vite build` passes; mobile bundle compiles. `/m/reports` continues to render the existing mobile report layout.
+
+### Build Results
+
+| Command | Result |
+|---------|--------|
+| `npx vite build` | ✅ `✓ built in 6.07s` — no errors |
+| `npx tsc -p tsconfig.server.json` | ✅ exit 0 — **all pre-existing `report/index.ts` errors fixed** |
+
+### Known Limitations
+
+- Demo data has only one doctor populated on visits (`DOCTOR_ID = "2"`), so the doctor production table typically shows a single row (Dr. Mohammed Al-Mansouri) plus possibly an Unassigned fallback. Once visits start carrying varied `doctorId` values, the table will fill out.
+- Print/PDF relies on the browser's native print-to-PDF; appearance varies slightly by browser.
+- CSV export is per-range; bulk historical export still goes through the existing admin `/api/reports/export/*` links, which we preserved on the Prescription tab.
+- Pop-up blockers can prevent the Print window from opening; user is alerted to allow pop-ups.
+- Patient growth uses each patient's all-time first visit — depending on demo-store seeding, "new" patients may concentrate on a single date.
 
 ---
 
