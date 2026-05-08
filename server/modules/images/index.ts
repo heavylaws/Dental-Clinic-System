@@ -25,14 +25,22 @@ const storage = multer.diskStorage({
     },
 });
 
+const ALLOWED_MIME_TYPES = [
+    "image/jpeg",
+    "image/png",
+    "image/gif",
+    "image/webp",
+    "image/bmp",
+];
+
 const upload = multer({
     storage,
     limits: { fileSize: 10 * 1024 * 1024 },
     fileFilter: (_req, file, cb) => {
-        if (/\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(file.originalname)) {
+        if (ALLOWED_MIME_TYPES.includes(file.mimetype)) {
             cb(null, true);
         } else {
-            cb(new Error("Only image files are allowed"));
+            cb(new Error(`Rejected file type: ${file.mimetype}. Only JPEG, PNG, GIF, WebP, and BMP are allowed.`));
         }
     },
 });

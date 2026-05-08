@@ -2,6 +2,8 @@ import "dotenv/config";
 import express from "express";
 import session from "express-session";
 import cors from "cors";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 import { createServer } from "http";
 import { createServer as createHttpsServer } from "https";
 import fs from "fs";
@@ -29,13 +31,48 @@ import { demoSettings } from "./demo-store.js";
 import { initPersistence, isPersistenceEnabled, persistState } from "./persistence.js";
 import path from "path";
 
+// ─── Environment Validation ──────────────────────────────────────────
+
+const NODE_ENV = process.env.NODE_ENV || "development";
+const isProduction = NODE_ENV === "production";
+
+if (isProduction && !process.env.SESSION_SECRET) {
+    console.error("FATAL: SESSION_SECRET is required in production. Set it in your .env file.");
+    process.exit(1);
+}
+
+if (isProduction && !process.env.CORS_ORIGIN) {
+    console.warn("WARNING: CORS_ORIGIN is not set in production. API will reject cross-origin requests.");
+}
+
+function getCorsOrigin(): boolean | string | string[] {
+    const raw = process.env.CORS_ORIGIN;
+    if (!raw || raw === "true") return true;
+    if (raw === "false") return false;
+    const list = raw.split(",").map((s) => s.trim()).filter(Boolean);
+    return list.length === 1 ? list[0] : list;
+}
+
 const app = express();
 const server = createServer(app);
 
 // ─── Middleware ──────────────────────────────────────────────────────
 
-app.use(cors({ origin: true, credentials: true }));
+app.use(helmet({ contentSecurityPolicy: false }));
+app.use(cors({ origin: getCorsOrigin(), credentials: true }));
 app.use(express.json({ limit: "10mb" }));
+
+// ─── Rate Limiting ───────────────────────────────────────────────────
+
+const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skipSuccessfulRequests: true,
+    message: { error: "Too many login attempts. Please try again later." },
+});
+app.use("/api/auth/login", loginLimiter);
 
 // Persist in-memory data to PostgreSQL after successful write operations.
 app.use((req, res, next) => {
@@ -62,7 +99,8 @@ const sessionMiddleware = session({
     cookie: {
         maxAge: 8 * 60 * 60 * 1000, // 8 hours
         httpOnly: true,
-        secure: false, // local network only
+        secure: isProduction,
+        sameSite: isProduction ? "strict" : "lax",
     },
 });
 
@@ -169,3 +207,16 @@ if (fs.existsSync(certPath) && fs.existsSync(keyPath)) {
     console.log("⚠️  No SSL certs found in certs/ — HTTPS disabled (camera won't work on phones)");
     console.log("   Run: openssl req -x509 -newkey rsa:2048 -keyout certs/key.pem -out certs/cert.pem -days 3650 -nodes -subj '/CN=DermClinic'");
 }
+
+// ─── Production Error Handler ───────────────────────────────────────
+
+app.use((err: any, _req: any, res: any, _next: any) => {
+    console.error("Unhandled error:", err);
+    if (res.headersSent) return;
+    const status = err.status || err.statusCode || 500;
+    if (isProduction) {
+        res.status(status).json({ error: "Internal server error" });
+    } else {
+        res.status(status).json({ error: err.message || "Internal server error", stack: err.stack });
+    }
+});

@@ -2,6 +2,7 @@ import { Router } from "express";
 import passport from "passport";
 import { Strategy as LocalStrategy } from "passport-local";
 import type { Express, Request, Response, NextFunction } from "express";
+import bcrypt from "bcryptjs";
 
 const router = Router();
 
@@ -16,40 +17,53 @@ interface DemoUser {
     isActive: boolean;
 }
 
-const demoUsers: DemoUser[] = [
-    {
-        id: "1",
-        username: "admin",
-        password: "admin123",
-        displayName: "Admin",
-        role: "admin",
-        isActive: true,
-    },
-    {
-        id: "2",
-        username: "doctor",
-        password: "doctor123",
-        displayName: "Dr. Mohammed Al-Mansouri",
-        role: "doctor",
-        isActive: true,
-    },
-    {
-        id: "3",
-        username: "reception",
-        password: "reception123",
-        displayName: "Reception",
-        role: "reception",
-        isActive: true,
-    },
-    {
-        id: "4",
-        username: "doctor2",
-        password: "doctor123",
-        displayName: "Dr. Layla Boujdaria",
-        role: "doctor",
-        isActive: true,
-    },
-];
+const PLAIN_PASSWORDS: Record<string, string> = {
+    admin: "admin123",
+    doctor: "doctor123",
+    reception: "reception123",
+    doctor2: "doctor123",
+};
+
+const DEMO_BCRYPT_ROUNDS = 4;
+
+function hashDemoPasswords(): DemoUser[] {
+    return [
+        {
+            id: "1",
+            username: "admin",
+            password: bcrypt.hashSync(PLAIN_PASSWORDS.admin, DEMO_BCRYPT_ROUNDS),
+            displayName: "Admin",
+            role: "admin",
+            isActive: true,
+        },
+        {
+            id: "2",
+            username: "doctor",
+            password: bcrypt.hashSync(PLAIN_PASSWORDS.doctor, DEMO_BCRYPT_ROUNDS),
+            displayName: "Dr. Mohammed Al-Mansouri",
+            role: "doctor",
+            isActive: true,
+        },
+        {
+            id: "3",
+            username: "reception",
+            password: bcrypt.hashSync(PLAIN_PASSWORDS.reception, DEMO_BCRYPT_ROUNDS),
+            displayName: "Reception",
+            role: "reception",
+            isActive: true,
+        },
+        {
+            id: "4",
+            username: "doctor2",
+            password: bcrypt.hashSync(PLAIN_PASSWORDS.doctor2, DEMO_BCRYPT_ROUNDS),
+            displayName: "Dr. Layla Boujdaria",
+            role: "doctor",
+            isActive: true,
+        },
+    ];
+}
+
+const demoUsers: DemoUser[] = hashDemoPasswords();
 
 // ─── Passport Setup ─────────────────────────────────────────────────
 
@@ -68,8 +82,7 @@ export function setupPassport(app: Express) {
                     if (!user) return done(null, false, { message: "Invalid credentials" });
                     if (!user.isActive) return done(null, false, { message: "Account disabled" });
 
-                    // Demo mode: plaintext password comparison
-                    const valid = password === user.password;
+                    const valid = bcrypt.compareSync(password, user.password);
                     if (!valid) return done(null, false, { message: "Invalid credentials" });
 
                     return done(null, user);
@@ -140,13 +153,13 @@ router.get("/me", (req, res) => {
 
 // ─── Bootstrap: Already initialized with demo users ───────────────
 
-router.post("/bootstrap", async (req, res) => {
+router.post("/bootstrap", async (_req, res) => {
     res.json({
         message: "Demo auth initialized",
         users: [
-            { username: "admin", password: "admin123", role: "admin" },
-            { username: "doctor", password: "doctor123", role: "doctor" },
-            { username: "reception", password: "reception123", role: "reception" },
+            { username: "admin", role: "admin" },
+            { username: "doctor", role: "doctor" },
+            { username: "reception", role: "reception" },
         ],
     });
 });
