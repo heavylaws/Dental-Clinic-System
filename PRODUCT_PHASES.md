@@ -178,6 +178,101 @@ Filename: `clinic-owner-report-<from>-to-<to>.csv`. Implemented as a browser-sid
 
 ---
 
+## Phase 4A — Appointment Engine & Conflict Safety
+
+**Status:** ✅ COMPLETE
+
+### Goal
+Make the appointment system safer and more clinic-realistic before building advanced UI on top: enforce working hours, prevent double-booking, and surface clear errors. UI redesign and drag-and-drop are deferred to Phase 4B/4C.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `server/modules/appointment/index.ts` | Added working-hours config (Mon–Sat, 08:00–18:00, Sun closed), reusable conflict-detection helper, request validation. POST and PUT now reject with `400` (working hours) or `409` (conflict). New `GET /api/appointments/working-hours`. Existing fields (`type`, `notes`, `status`, etc.) are preserved on update via merge |
+| `client/src/lib/api.ts` | Enhanced `request()` to attach `status` and structured `body` to thrown errors so the UI can render server-provided detail. No existing API method renamed |
+| `client/src/pages/Appointments.tsx` | Added a friendly error banner inside the create/edit dialog covering three cases: time-conflict (with conflicting patient/doctor/time/duration), outside working hours, and generic fallback. Banner resets on dialog open/close/submit. Fixed a pre-existing strict-TS index error around `DOCTOR_ACCENT[appt.doctorId]` |
+| `PRODUCT_PHASES.md` | This entry |
+
+### Conflict Detection
+
+A reusable `findConflict()` helper inside `server/modules/appointment/index.ts`. Conflict criteria:
+
+- Same `doctorId`
+- Same `appointmentDate`
+- Time intervals overlap using the rule **A starts before B ends AND B starts before A ends** (touching boundaries do NOT conflict — `09:00–09:30` and `09:30–10:00` are allowed)
+- Both candidate and existing appointments are in a *blocking* status (i.e. NOT `cancelled` and NOT `no_show`/`no-show`)
+- Self is excluded on update via `excludeId`
+
+Conflict response (HTTP **409**):
+
+```json
+{
+  "message": "Appointment conflict detected",
+  "conflict": {
+    "appointmentId": "…",
+    "patientName": "…",
+    "doctorName": "…",
+    "appointmentDate": "YYYY-MM-DD",
+    "timeSlot": "HH:mm",
+    "duration": 30
+  }
+}
+```
+
+Falls back to a default 30-minute duration if `duration` is missing/invalid. Numbers parsed defensively.
+
+### Working-Hours Validation
+
+Constants in the appointment module (no settings UI yet):
+
+- Open: 08:00 (480 minutes)
+- Close: 18:00 (1080 minutes)
+- Closed days: Sunday (UTC `getUTCDay()` == 0)
+- Default duration: 30 minutes
+
+Validation runs on POST and on PUT (only when the merged appointment is in a blocking status, so cancelling a Sunday legacy record still works). Rejects with HTTP **400**:
+
+```json
+{ "message": "Appointment is outside clinic working hours (08:00–18:00)." }
+```
+
+…or `(clinic is closed that day).` for Sunday.
+
+Date strings use the same UTC `YYYY-MM-DD` convention established in Phase 2 / Phase 3.
+
+### UI Behavior
+
+- **Create with overlap** → dialog stays open with rose-tinted banner: `⚠ Time conflict — Conflicts with <patient> — <doctor> on <date> at <time> (Nm). Pick a different time, doctor, or duration.`
+- **Sunday or out-of-hours** → amber banner: `⚠ Outside working hours` + server message.
+- **Generic 5xx / network** → neutral banner with the underlying message.
+- Banner clears on submit, dialog open, dialog close, and on successful save.
+- Existing list/day/week views, doctor filter, status badges, WhatsApp reminder buttons, and patient picker behavior are all preserved.
+
+### Mobile Regression Note
+
+- Zero files under `client/src/mobile/` modified. Verified via `git status`.
+- `MobileAppointments.tsx` continues to call `api.appointments.list`, `api.appointments.updateStatus`, and `api.appointments.create` with unchanged signatures.
+- A mobile create that would conflict or be out-of-hours now receives 409/400 instead of silent success. React Query mutations enter the standard error state — no crash. Mobile UI does not surface a friendly error in this phase by design (mobile UI redesign is deferred to Phase 4D).
+
+### Build Results
+
+| Command | Result |
+|---------|--------|
+| `npx vite build` | ✅ `✓ built in 5.88s` — no errors |
+| `npx tsc -p tsconfig.server.json` | ✅ exit 0 — no errors |
+
+### Known Limitations
+
+- Working-hours config is a constant in code, not a configurable setting. A real settings UI is deferred (likely Phase 4B/4E).
+- Per-doctor working hours (e.g. one doctor only Wed/Fri) are not modeled yet — clinic-wide hours apply to everyone.
+- Chair/room resource conflict detection is not modeled — only doctor + time.
+- Walk-in vs scheduled distinction is not in the schema; not added to avoid a migration in this phase. Documented for a later phase.
+- Mobile appointment dialog does not surface friendly conflict/working-hours errors yet (no UI redesign in this phase). Errors still propagate as React Query error states without crashing.
+- Day-of-week is computed in UTC for consistency with stored dates. In timezones far from UTC, a date typed locally is still treated by its calendar string, so the rule is intuitive.
+
+---
+
 ## Future Phases (Not Yet Defined)
 
 To be filled in by product owner.

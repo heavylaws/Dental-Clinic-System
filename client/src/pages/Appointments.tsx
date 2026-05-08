@@ -94,12 +94,38 @@ export default function Appointments() {
         enabled: showDialog,
     });
 
+    // Friendly error display in the appointment dialog
+    const [formError, setFormError] = useState<{
+        kind: "conflict" | "working-hours" | "generic";
+        message: string;
+        conflict?: {
+            patientName?: string | null;
+            doctorName?: string | null;
+            appointmentDate?: string;
+            timeSlot?: string;
+            duration?: number;
+        };
+    } | null>(null);
+
+    function handleMutationError(e: any) {
+        const body = e?.body;
+        const message: string = e?.message || "Failed to save appointment.";
+        if (e?.status === 409 && body?.conflict) {
+            setFormError({ kind: "conflict", message, conflict: body.conflict });
+        } else if (e?.status === 400 && /working hours/i.test(message)) {
+            setFormError({ kind: "working-hours", message });
+        } else {
+            setFormError({ kind: "generic", message });
+        }
+    }
+
     const createMutation = useMutation({
         mutationFn: (data: any) => api.appointments.create(data),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["appointments"] });
             closeDialog();
         },
+        onError: handleMutationError,
     });
 
     const updateMutation = useMutation({
@@ -108,6 +134,7 @@ export default function Appointments() {
             queryClient.invalidateQueries({ queryKey: ["appointments"] });
             closeDialog();
         },
+        onError: handleMutationError,
     });
 
     const statusMutation = useMutation({
@@ -133,6 +160,7 @@ export default function Appointments() {
         setFormDoctorId(doctorFilter || doctorList[0]?.id || "2");
         setSelectedPatient(null);
         setSearchQuery("");
+        setFormError(null);
         setShowDialog(true);
     }
 
@@ -146,6 +174,7 @@ export default function Appointments() {
         setFormDoctorId(appt.doctorId || doctorFilter || doctorList[0]?.id || "2");
         setSelectedPatient({ id: appt.patientId, firstName: appt.patientName.split(" ")[0], lastName: appt.patientName.split(" ").slice(1).join(" ") });
         setSearchQuery("");
+        setFormError(null);
         setShowDialog(true);
     }
 
@@ -154,11 +183,13 @@ export default function Appointments() {
         setEditingAppointment(null);
         setSelectedPatient(null);
         setSearchQuery("");
+        setFormError(null);
     }
 
     function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
         if (!selectedPatient) return;
+        setFormError(null);
 
         const data = {
             patientId: selectedPatient.id,
@@ -314,6 +345,39 @@ export default function Appointments() {
                         <p className="text-xs text-gray-500 mb-4">
                             Tip: click empty slots or use + in the calendar grid to create quickly.
                         </p>
+
+                        {/* Error banner (conflict / working-hours / generic) */}
+                        {formError && (
+                            <div
+                                role="alert"
+                                className={`mb-4 rounded-xl border px-4 py-3 text-sm ${formError.kind === "conflict"
+                                    ? "bg-rose-50 border-rose-200 text-rose-800"
+                                    : formError.kind === "working-hours"
+                                        ? "bg-amber-50 border-amber-200 text-amber-800"
+                                        : "bg-gray-50 border-gray-200 text-gray-700"
+                                    }`}
+                            >
+                                <p className="font-semibold mb-0.5">
+                                    {formError.kind === "conflict" && "⚠ Time conflict"}
+                                    {formError.kind === "working-hours" && "⚠ Outside working hours"}
+                                    {formError.kind === "generic" && "Could not save appointment"}
+                                </p>
+                                <p>{formError.message}</p>
+                                {formError.kind === "conflict" && formError.conflict && (
+                                    <p className="mt-1 text-xs opacity-90">
+                                        Conflicts with{" "}
+                                        <span className="font-semibold">
+                                            {formError.conflict.patientName || "another appointment"}
+                                        </span>{" "}
+                                        — {formError.conflict.doctorName || "same doctor"} on{" "}
+                                        {formError.conflict.appointmentDate} at {formError.conflict.timeSlot}
+                                        {formError.conflict.duration ? ` (${formError.conflict.duration}m)` : ""}.
+                                        Pick a different time, doctor, or duration.
+                                    </p>
+                                )}
+                            </div>
+                        )}
+
                         <form onSubmit={handleSubmit} className="space-y-4">
                             {/* Patient Picker */}
                             <div>
@@ -524,7 +588,7 @@ function DayView({
                             {slotAppts.map((appt) => (
                                 <div
                                     key={appt.id}
-                                    className={`rounded-lg px-3 py-1.5 border text-sm font-medium flex items-center gap-2 ${STATUS_COLORS[appt.status] || STATUS_COLORS.scheduled} ${DOCTOR_ACCENT[appt.doctorId] || ""}`}
+                                    className={`rounded-lg px-3 py-1.5 border text-sm font-medium flex items-center gap-2 ${STATUS_COLORS[appt.status] || STATUS_COLORS.scheduled} ${(appt.doctorId && DOCTOR_ACCENT[appt.doctorId]) || ""}`}
                                     onClick={(e) => e.stopPropagation()}
                                 >
                                     <span className="font-bold">{appt.patientName}</span>

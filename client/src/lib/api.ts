@@ -11,8 +11,14 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     });
 
     if (!res.ok) {
-        const error = await res.json().catch(() => ({ error: res.statusText }));
-        throw new Error(error.error || error.message || "Request failed");
+        const body = await res.json().catch(() => ({ error: res.statusText }));
+        const err = new Error(body.error || body.message || "Request failed") as Error & {
+            status?: number;
+            body?: any;
+        };
+        err.status = res.status;
+        err.body = body;
+        throw err;
     }
 
     return res.json();
