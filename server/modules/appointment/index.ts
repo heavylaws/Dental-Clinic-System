@@ -46,6 +46,7 @@ function dayOfWeekUtc(dateStr: string): number | null {
 
 interface ApptShape {
     id?: string;
+    patientId?: string;
     doctorId?: string;
     appointmentDate?: string;
     timeSlot?: string;
@@ -81,14 +82,16 @@ function validateWorkingHours(appointmentDate: string, timeSlot: string, duratio
 
 /**
  * Find the first conflicting appointment, or null if none.
- * Conflict = same doctor, same date, time-overlap, both blocking statuses, different id.
+ * Checks for:
+ * A) Doctor conflict: same doctor, same date, time-overlap, both blocking statuses
+ * B) Patient conflict: same patient, same date, time-overlap, both blocking statuses
  * Overlap rule: A starts before B ends AND B starts before A ends.
  */
 function findConflict(
     appts: ApptShape[],
-    candidate: { doctorId?: string; appointmentDate: string; timeSlot: string; duration: number; status?: string },
+    candidate: { patientId?: string; doctorId?: string; appointmentDate: string; timeSlot: string; duration: number; status?: string },
     excludeId?: string,
-): ApptShape | null {
+): { conflict: ApptShape; type: "doctor_conflict" | "patient_conflict" } | null {
     if (!isBlocking(candidate)) return null;
     const aStart = timeToMinutes(candidate.timeSlot);
     if (aStart === null) return null;
@@ -96,7 +99,6 @@ function findConflict(
 
     for (const b of appts) {
         if (!b || b.id === excludeId) continue;
-        if (b.doctorId !== candidate.doctorId) continue;
         if (b.appointmentDate !== candidate.appointmentDate) continue;
         if (!isBlocking(b)) continue;
 
@@ -104,21 +106,37 @@ function findConflict(
         if (bStart === null) continue;
         const bEnd = bStart + safeDuration(b.duration);
 
-        // Overlap if A starts before B ends AND B starts before A ends
-        if (aStart < bEnd && bStart < aEnd) {
-            return b;
+        // Check overlap: A starts before B ends AND B starts before A ends
+        if (aStart >= bEnd || bStart >= aEnd) continue; // No overlap
+
+        // Overlap exists. Check conflict types:
+        // A) Doctor conflict (same doctor)
+        if (b.doctorId === candidate.doctorId) {
+            return { conflict: b, type: "doctor_conflict" };
+        }
+
+        // B) Patient conflict (same patient)
+        if (b.patientId === candidate.patientId) {
+            return { conflict: b, type: "patient_conflict" };
         }
     }
     return null;
 }
 
-function buildConflictResponse(conflict: ApptShape) {
+function buildConflictResponse(conflictInfo: { conflict: ApptShape; type: "doctor_conflict" | "patient_conflict" }) {
+    const { conflict, type } = conflictInfo;
     const pt = conflict.id ? demoPatients.find((p) => {
         const a = demoAppointments.find((x) => x.id === conflict.id);
         return a && p.id === a.patientId;
     }) : null;
+    
+    const message = type === "patient_conflict"
+        ? "Patient already has an overlapping appointment"
+        : "Appointment conflict detected";
+
     return {
-        message: "Appointment conflict detected",
+        message,
+        type,
         conflict: {
             appointmentId: conflict.id,
             patientName: pt ? `${pt.firstName ?? ""} ${pt.lastName ?? ""}`.trim() || null : null,
@@ -200,9 +218,10 @@ router.post("/", (req, res) => {
     const timeSlot = String(body.timeSlot || "");
     const duration = safeDuration(body.duration);
     const doctorId = body.doctorId ? String(body.doctorId) : undefined;
+    const patientId = body.patientId ? String(body.patientId) : undefined;
     const status = body.status ? String(body.status) : "scheduled";
 
-    if (!body.patientId) return res.status(400).json({ message: "patientId is required" });
+    if (!patientId) return res.status(400).json({ message: "patientId is required" });
     if (!doctorId) return res.status(400).json({ message: "doctorId is required" });
     if (!appointmentDate) return res.status(400).json({ message: "appointmentDate is required" });
     if (!timeSlot) return res.status(400).json({ message: "timeSlot is required" });
@@ -213,12 +232,17 @@ router.post("/", (req, res) => {
         if (whErr) return res.status(400).json({ message: whErr });
     }
 
-    // Conflict detection
-    const conflict = findConflict(demoAppointments, {
-        doctorId, appointmentDate, timeSlot, duration, status,
+    // Conflict detection (doctor or patient)
+    const conflictInfo = findConflict(demoAppointments, {
+        patientId,
+        doctorId,
+        appointmentDate,
+        timeSlot,
+        duration,
+        status,
     });
-    if (conflict) {
-        return res.status(409).json(buildConflictResponse(conflict));
+    if (conflictInfo) {
+        return res.status(409).json(buildConflictResponse(conflictInfo));
     }
 
     const appt = {
@@ -227,6 +251,7 @@ router.post("/", (req, res) => {
         createdAt: new Date().toISOString(),
         ...body,
         doctorId,
+        patientId,
         appointmentDate,
         timeSlot,
         duration,
@@ -247,23 +272,53 @@ router.put("/:id", (req, res) => {
     const timeSlot = String(merged.timeSlot || "");
     const duration = safeDuration(merged.duration);
     const doctorId = merged.doctorId ? String(merged.doctorId) : undefined;
+    const patientId = merged.patientId ? String(merged.patientId) : undefined;
 
     // Re-validate working hours and conflicts only if the appointment is in a blocking state
     if (isBlocking(merged)) {
         const whErr = validateWorkingHours(appointmentDate, timeSlot, duration);
         if (whErr) return res.status(400).json({ message: whErr });
 
-        const conflict = findConflict(demoAppointments, {
-            doctorId, appointmentDate, timeSlot, duration, status: merged.status,
+        const conflictInfo = findConflict(demoAppointments, {
+            patientId,
+            doctorId,
+            appointmentDate,
+            timeSlot,
+            duration,
+            status: merged.status,
         }, existing.id);
-        if (conflict) {
-            return res.status(409).json(buildConflictResponse(conflict));
+        if (conflictInfo) {
+            return res.status(409).json(buildConflictResponse(conflictInfo));
         }
     }
 
-    demoAppointments[idx] = { ...merged, doctorId, appointmentDate, timeSlot, duration };
+    demoAppointments[idx] = { ...merged, doctorId, patientId, appointmentDate, timeSlot, duration };
     res.json(demoAppointments[idx]);
 });
+
+// Update appointment status or notes (PATCH - no schedule validation)
+function patchAppointment(req: any, res: any) {
+    const idx = demoAppointments.findIndex((a) => a.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ message: "Appointment not found" });
+
+    const existing = demoAppointments[idx];
+    const updates: any = {};
+    
+    // Only allow non-schedule fields to be patched
+    if (req.body.status !== undefined) updates.status = String(req.body.status);
+    if (req.body.notes !== undefined) updates.notes = req.body.notes;
+    if (req.body.type !== undefined) updates.type = String(req.body.type);
+    
+    const merged = { ...existing, ...updates };
+    demoAppointments[idx] = merged;
+    res.json(merged);
+}
+
+// Backward-compatible status route used by desktop/mobile clients
+router.patch("/:id/status", patchAppointment);
+
+// Generic patch route for future-safe clients
+router.patch("/:id", patchAppointment);
 
 // Delete appointment
 router.delete("/:id", (req, res) => {

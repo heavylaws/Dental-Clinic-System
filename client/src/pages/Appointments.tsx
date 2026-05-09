@@ -96,8 +96,9 @@ export default function Appointments() {
 
     // Friendly error display in the appointment dialog
     const [formError, setFormError] = useState<{
-        kind: "conflict" | "working-hours" | "generic";
+        kind: "doctor_conflict" | "patient_conflict" | "working-hours" | "generic";
         message: string;
+        conflictType?: string;
         conflict?: {
             patientName?: string | null;
             doctorName?: string | null;
@@ -111,7 +112,9 @@ export default function Appointments() {
         const body = e?.body;
         const message: string = e?.message || "Failed to save appointment.";
         if (e?.status === 409 && body?.conflict) {
-            setFormError({ kind: "conflict", message, conflict: body.conflict });
+            const conflictType = body.type || "doctor_conflict";
+            const kind = (conflictType === "patient_conflict" ? "patient_conflict" : "doctor_conflict") as "doctor_conflict" | "patient_conflict";
+            setFormError({ kind, message, conflictType, conflict: body.conflict });
         } else if (e?.status === 400 && /working hours/i.test(message)) {
             setFormError({ kind: "working-hours", message });
         } else {
@@ -146,6 +149,10 @@ export default function Appointments() {
     const deleteMutation = useMutation({
         mutationFn: (id: string) => api.appointments.delete(id),
         onSuccess: () => queryClient.invalidateQueries({ queryKey: ["appointments"] }),
+        onError: (e: any) => {
+            const message: string = e?.message || "Failed to delete appointment.";
+            setFormError({ kind: "generic", message });
+        },
     });
 
     // ─── Helpers ─────────────────────────────────────────────────────
@@ -322,7 +329,11 @@ export default function Appointments() {
                     onSlotClick={(time: string) => openCreate(dateStr, time)}
                     onEdit={openEdit}
                     onStatusChange={(id: string, status: string) => statusMutation.mutate({ id, status })}
-                    onDelete={(id: string) => deleteMutation.mutate(id)}
+                    onDelete={(id: string) => {
+                        if (!window.confirm("Delete this appointment permanently?")) return;
+                        setFormError(null);
+                        deleteMutation.mutate(id);
+                    }}
                     sendWaReminder={sendWaReminder}
                 />
             ) : (
@@ -346,11 +357,11 @@ export default function Appointments() {
                             Tip: click empty slots or use + in the calendar grid to create quickly.
                         </p>
 
-                        {/* Error banner (conflict / working-hours / generic) */}
+                        {/* Error banner (doctor conflict / patient conflict / working-hours / generic) */}
                         {formError && (
                             <div
                                 role="alert"
-                                className={`mb-4 rounded-xl border px-4 py-3 text-sm ${formError.kind === "conflict"
+                                className={`mb-4 rounded-xl border px-4 py-3 text-sm ${formError.kind === "doctor_conflict" || formError.kind === "patient_conflict"
                                     ? "bg-rose-50 border-rose-200 text-rose-800"
                                     : formError.kind === "working-hours"
                                         ? "bg-amber-50 border-amber-200 text-amber-800"
@@ -358,14 +369,17 @@ export default function Appointments() {
                                     }`}
                             >
                                 <p className="font-semibold mb-0.5">
-                                    {formError.kind === "conflict" && "⚠ Time conflict"}
+                                    {formError.kind === "doctor_conflict" && "⚠ Time conflict"}
+                                    {formError.kind === "patient_conflict" && "⚠ Patient already has appointment"}
                                     {formError.kind === "working-hours" && "⚠ Outside working hours"}
                                     {formError.kind === "generic" && "Could not save appointment"}
                                 </p>
                                 <p>{formError.message}</p>
-                                {formError.kind === "conflict" && formError.conflict && (
+                                {(formError.kind === "doctor_conflict" || formError.kind === "patient_conflict") && formError.conflict && (
                                     <p className="mt-1 text-xs opacity-90">
-                                        Conflicts with{" "}
+                                        {formError.kind === "patient_conflict"
+                                            ? "This patient already has another appointment at this time: "
+                                            : "Conflicts with "}
                                         <span className="font-semibold">
                                             {formError.conflict.patientName || "another appointment"}
                                         </span>{" "}
@@ -624,6 +638,13 @@ function DayView({
                                             title="Edit"
                                         >
                                             ✎
+                                        </button>
+                                        <button
+                                            onClick={() => onDelete(appt.id)}
+                                            className="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-700 hover:bg-red-200"
+                                            title="Delete permanently"
+                                        >
+                                            🗑
                                         </button>
                                         {appt.patientPhone && (
                                             <button

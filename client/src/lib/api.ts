@@ -21,6 +21,11 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
         throw err;
     }
 
+    // Handle 204 No Content or empty responses
+    if (res.status === 204 || res.headers.get("content-length") === "0") {
+        return {} as T;
+    }
+
     return res.json();
 }
 

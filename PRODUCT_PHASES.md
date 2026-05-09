@@ -183,32 +183,58 @@ Filename: `clinic-owner-report-<from>-to-<to>.csv`. Implemented as a browser-sid
 **Status:** ✅ COMPLETE
 
 ### Goal
-Make the appointment system safer and more clinic-realistic before building advanced UI on top: enforce working hours, prevent double-booking, and surface clear errors. UI redesign and drag-and-drop are deferred to Phase 4B/4C.
+Make the appointment system safer and more clinic-realistic before building advanced UI on top: enforce working hours, prevent double-booking by doctor OR patient, and surface clear errors. UI redesign and drag-and-drop are deferred to Phase 4B/4C.
 
 ### Files Changed
 
 | File | Change |
 |------|--------|
-| `server/modules/appointment/index.ts` | Added working-hours config (Mon–Sat, 08:00–18:00, Sun closed), reusable conflict-detection helper, request validation. POST and PUT now reject with `400` (working hours) or `409` (conflict). New `GET /api/appointments/working-hours`. Existing fields (`type`, `notes`, `status`, etc.) are preserved on update via merge |
-| `client/src/lib/api.ts` | Enhanced `request()` to attach `status` and structured `body` to thrown errors so the UI can render server-provided detail. No existing API method renamed |
-| `client/src/pages/Appointments.tsx` | Added a friendly error banner inside the create/edit dialog covering three cases: time-conflict (with conflicting patient/doctor/time/duration), outside working hours, and generic fallback. Banner resets on dialog open/close/submit. Fixed a pre-existing strict-TS index error around `DOCTOR_ACCENT[appt.doctorId]` |
-| `PRODUCT_PHASES.md` | This entry |
+| `server/modules/appointment/index.ts` | Added working-hours config (Mon–Sat, 08:00–18:00, Sun closed), refactored `findConflict()` helper to detect both doctor and patient overlaps with conflict type, added PATCH endpoint for safe status/notes updates without re-validating schedule. POST, PUT, PATCH validate appropriately. New `GET /api/appointments/working-hours`. Existing fields (`type`, `notes`, `status`, etc.) are preserved on update via merge |
+| `client/src/lib/api.ts` | Enhanced `request()` to safely handle 204 No Content and empty responses. Enhanced error handling to attach `status` and structured `body` to thrown errors so the UI can render server-provided detail. No existing API method renamed |
+| `client/src/pages/Appointments.tsx` | Added friendly error banners for doctor_conflict and patient_conflict with distinct messages. Dialog shows conflicting appointment details (patient, doctor, date, time, duration). Banner clears on dialog open/close/submit. Fixed pre-existing strict-TS index error around `DOCTOR_ACCENT[appt.doctorId]` |
+| `PRODUCT_PHASES.md` | This entry — updated for patient conflict and delete/cancel safety |
 
-### Conflict Detection
+### Conflict Detection (Updated for Phase 4A Surgical Fix)
 
-A reusable `findConflict()` helper inside `server/modules/appointment/index.ts`. Conflict criteria:
+A refactored `findConflict()` helper inside `server/modules/appointment/index.ts`. Detects **two types** of conflicts:
 
+**A) Doctor Conflict:**
 - Same `doctorId`
 - Same `appointmentDate`
 - Time intervals overlap using the rule **A starts before B ends AND B starts before A ends** (touching boundaries do NOT conflict — `09:00–09:30` and `09:30–10:00` are allowed)
-- Both candidate and existing appointments are in a *blocking* status (i.e. NOT `cancelled` and NOT `no_show`/`no-show`)
+- Both candidate and existing appointments are in a *blocking* status (NOT `cancelled`, `no_show`, `no-show`)
 - Self is excluded on update via `excludeId`
 
-Conflict response (HTTP **409**):
+**B) Patient Conflict (NEW in surgical fix):**
+- Same `patientId`
+- Same `appointmentDate`
+- Time intervals overlap (same rule as above)
+- Both candidate and existing appointments are in a *blocking* status
+- Self is excluded on update
+
+Conflict response (HTTP **409**) — **doctor conflict:**
 
 ```json
 {
   "message": "Appointment conflict detected",
+  "type": "doctor_conflict",
+  "conflict": {
+    "appointmentId": "…",
+    "patientName": "…",
+    "doctorName": "…",
+    "appointmentDate": "YYYY-MM-DD",
+    "timeSlot": "HH:mm",
+    "duration": 30
+  }
+}
+```
+
+Conflict response (HTTP **409**) — **patient conflict:**
+
+```json
+{
+  "message": "Patient already has an overlapping appointment",
+  "type": "patient_conflict",
   "conflict": {
     "appointmentId": "…",
     "patientName": "…",
@@ -241,9 +267,33 @@ Validation runs on POST and on PUT (only when the merged appointment is in a blo
 
 Date strings use the same UTC `YYYY-MM-DD` convention established in Phase 2 / Phase 3.
 
+### Appointment Cancellation & Deletion (NEW in surgical fix)
+
+**Status Updates (PATCH):**
+- `PATCH /api/appointments/:id` with `{ status: "cancelled" }` — bypasses schedule validation, allows cancellation of any appointment
+- Accepts: `status`, `notes`, `type` fields only
+- Does not re-validate working hours or conflicts
+- Enables safe soft-delete by status change
+
+**Hard Delete (DELETE):**
+- `DELETE /api/appointments/:id` — removes appointment entirely
+- Bypasses schedule validation
+- Returns `{ success: true }` or empty response
+
+**Backend Validation Policy:**
+- Schedule-relevant fields (date, time, doctor, patient, duration) trigger validation only when changing a blocking appointment to another blocking state
+- Status changes to cancelled/no_show/no-show are always allowed
+- All validation is skipped on PATCH and DELETE
+
+**Frontend Behavior:**
+- Cancel button calls PATCH endpoint to change status to `cancelled` (soft-delete)
+- Delete button calls DELETE endpoint (hard-delete)
+- After cancel/delete, React Query refetches appointment list
+
 ### UI Behavior
 
-- **Create with overlap** → dialog stays open with rose-tinted banner: `⚠ Time conflict — Conflicts with <patient> — <doctor> on <date> at <time> (Nm). Pick a different time, doctor, or duration.`
+- **Create with doctor overlap** → dialog stays open with rose-tinted banner: `⚠ Time conflict — Conflicts with <patient> — <doctor> on <date> at <time> (Nm). Pick a different time, doctor, or duration.`
+- **Create with patient overlap** → dialog stays open with rose-tinted banner: `⚠ Patient already has appointment — This patient already has another appointment at this time: <patient> — <doctor> on <date> at <time> (Nm). Pick a different time, doctor, or duration.`
 - **Sunday or out-of-hours** → amber banner: `⚠ Outside working hours` + server message.
 - **Generic 5xx / network** → neutral banner with the underlying message.
 - Banner clears on submit, dialog open, dialog close, and on successful save.
@@ -253,23 +303,39 @@ Date strings use the same UTC `YYYY-MM-DD` convention established in Phase 2 / P
 
 - Zero files under `client/src/mobile/` modified. Verified via `git status`.
 - `MobileAppointments.tsx` continues to call `api.appointments.list`, `api.appointments.updateStatus`, and `api.appointments.create` with unchanged signatures.
-- A mobile create that would conflict or be out-of-hours now receives 409/400 instead of silent success. React Query mutations enter the standard error state — no crash. Mobile UI does not surface a friendly error in this phase by design (mobile UI redesign is deferred to Phase 4D).
+- A mobile create that would conflict (doctor or patient) or be out-of-hours now receives 409/400 instead of silent success. React Query mutations enter the standard error state — no crash. Mobile UI does not surface a friendly error in this phase by design (mobile UI redesign is deferred to Phase 4D).
+- PATCH endpoint is available for mobile status updates if needed in future phases.
 
 ### Build Results
 
 | Command | Result |
 |---------|--------|
-| `npx vite build` | ✅ `✓ built in 5.88s` — no errors |
-| `npx tsc -p tsconfig.server.json` | ✅ exit 0 — no errors |
+| `npx vite build` | ✅ (run in surgical fix phase) |
+| `npx tsc -p tsconfig.server.json` | ✅ (run in surgical fix phase) |
 
 ### Known Limitations
 
 - Working-hours config is a constant in code, not a configurable setting. A real settings UI is deferred (likely Phase 4B/4E).
 - Per-doctor working hours (e.g. one doctor only Wed/Fri) are not modeled yet — clinic-wide hours apply to everyone.
-- Chair/room resource conflict detection is not modeled — only doctor + time.
+- Chair/room resource conflict detection is not modeled — only doctor + patient + time.
 - Walk-in vs scheduled distinction is not in the schema; not added to avoid a migration in this phase. Documented for a later phase.
 - Mobile appointment dialog does not surface friendly conflict/working-hours errors yet (no UI redesign in this phase). Errors still propagate as React Query error states without crashing.
 - Day-of-week is computed in UTC for consistency with stored dates. In timezones far from UTC, a date typed locally is still treated by its calendar string, so the rule is intuitive.
+
+### Surgical Audit Changes (Added in Phase 4A fix)
+
+This section documents the fixes applied to resolve manual testing issues:
+
+**Root Causes Fixed:**
+1. Same-patient double-booking: `findConflict()` only checked doctor overlap, not patient overlap
+2. Delete/cancel failure: Frontend called non-existent PATCH endpoint; `request()` didn't handle empty responses
+
+**Implementation:**
+- Refactored `findConflict()` to return `{ conflict, type: "doctor_conflict" | "patient_conflict" }`
+- Created PATCH endpoint for safe status/notes updates without schedule re-validation
+- Updated `request()` to safely handle 204 and empty responses
+- Updated frontend to display appropriate error messages per conflict type
+- Verified DELETE endpoint works (already in place) and bypasses validation
 
 ---
 
