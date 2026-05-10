@@ -501,6 +501,131 @@ Enable drag-and-drop rescheduling in desktop Day/Week views while preserving all
 
 ---
 
+## Phase 4D — Mobile Appointment Polish
+
+**Status:** ✅ COMPLETE
+
+### Goal
+Make mobile appointments (`/m/appointments`) usable, clear, and safe for chair-side or reception-on-phone workflows. Improve readability, add date navigation and filtering, polish appointment actions, and surface friendly error messages — without touching desktop `Appointments.tsx` or backend validation.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `client/src/mobile/pages/MobileAppointments.tsx` | Full rewrite — richer cards, Today/Prev/Next/date-picker navigation, status & doctor filters with clear button, Call/WhatsApp/Confirm/Complete/Cancel (with confirmation dialog) actions, friendly error banners for conflict and working-hours errors, Sunday closed empty state, filter empty state, no-appointments empty state, improved create form with doctor selector and per-field error messages |
+| `PRODUCT_PHASES.md` | This entry |
+
+### Mobile Appointment Card Improvements
+
+Each appointment card now shows:
+- **Time** — large, mono-weight, blue, flush left
+- **Patient name** — bold, ellipsis on overflow
+- **Status badge** — color-coded pill (Scheduled/Confirmed/Completed/Cancelled/No-show)
+- **Type badge** — neutral pill
+- **Doctor name** — secondary row, blue tint
+- **Duration** — secondary row (e.g. `30 min`)
+- **Phone number** — secondary row when present
+- **Left border accent** — color-coded by status
+
+Cards are vertically structured (3 rows) rather than the previous single-line layout, giving more breathing room and scanability on small screens.
+
+### Mobile Filters / Date Navigation
+
+**Navigation controls:**
+- **Today button** — in the date strip, always visible, highlighted when active
+- **‹ Prev / Next ›** — tap to go back/forward one day; clears the error banner on navigation
+- **Date picker** (`<input type="date">`) — fills the space between Prev/Next; setting any date jumps directly to it
+- **7-day strip** — centred on current date (±3 days); Sunday slots are visually dimmed
+
+**Filters (compact selects, horizontally scrollable row):**
+- **Status filter** — All / Scheduled / Confirmed / Completed / Cancelled / No-show
+- **Doctor filter** — All / [doctors from `GET /api/appointments/doctors`]; only shown when doctors exist
+- **✕ Clear** button — appears when any filter is active; resets both filters
+
+Filters are client-side; server data is never mutated.
+
+### Mobile Action Improvements
+
+Actions appear in a dedicated action row at the bottom of each card, separated by a hairline divider:
+
+| Action | Condition | Implementation |
+|--------|-----------|----------------|
+| 📞 Call | Phone present | `<a href="tel:…">` — opens native dialer |
+| 💬 WhatsApp | Phone present | `https://wa.me/{cleaned_digits}?text={pre-filled reminder}` — opens WhatsApp |
+| ✓ Confirm | Status `scheduled` | `PATCH /appointments/:id/status` → `confirmed` |
+| ✔ Complete | Status `scheduled` or `confirmed` | `PATCH /appointments/:id/status` → `completed` |
+| ✕ Cancel | Status not cancelled/completed | Opens in-app confirmation dialog (no `window.confirm`); on confirm → `PATCH /appointments/:id/status` → `cancelled` |
+
+All status mutations use the Phase 4A `PATCH /:id/status` endpoint — no schedule re-validation, always safe.
+
+Phone numbers are normalised (digits only) before building `tel:` and `wa.me` URLs.
+
+### Error Handling
+
+A `friendlyError()` helper maps server error codes/messages to human-readable strings:
+
+| Server signal | Mobile message |
+|---------------|----------------|
+| `body.type === "doctor_conflict"` | "Doctor already has an appointment at this time." |
+| `body.type === "patient_conflict"` | "Patient already has another appointment at this time." |
+| message contains `"working hours"` / `"outside clinic"` | "Appointment is outside clinic working hours." |
+| message contains `"closed that day"` / `"sunday"` | "The clinic is closed on Sunday." |
+| Any other error | Server message verbatim |
+
+**Error surfaces:**
+- **Global banner** (dismissible, rose) — status mutation errors appear above the appointment list
+- **Form inline banner** — create-form errors appear inside the dialog, above the submit button
+- Sunday pre-flight warning shown in the create form when the selected date is Sunday
+
+No crashes on any error path.
+
+### Mobile Empty States
+
+Three distinct empty states, all with icon + title + subtitle:
+
+| State | Icon | Title |
+|-------|------|-------|
+| Sunday selected | 🔒 | "Clinic Closed" + "The clinic is closed on Sundays." |
+| No appointments on day | 📅 | "No appointments today" + "Tap ➕ to schedule one." |
+| Appointments hidden by filter | 🔍 | "No appointments match filter" + "Clear Filters" button |
+
+### Mobile Create Appointment Form Improvements
+
+- **Doctor selector** — populated from `api.appointments.doctors()`; pre-selects first available doctor
+- **Expanded type options** — Consultation / Follow-up / Procedure / Cleaning / Emergency
+- **Sunday pre-flight warning** — amber banner shown in form when date is Sunday
+- **Error inline** — `⚠️ {friendlyError}` banner appears inside form on submit failure; clears on patient or doctor change
+- **Label added** — "Patient *" label above the search bar for clarity
+- Time slot range corrected to `08:00–17:30` (matching desktop, last slot starts at 17:30 → ends 18:00)
+
+### Desktop Regression Note
+
+- **Zero files modified** under `client/src/pages/` — `Appointments.tsx` is untouched.
+- `MobileDashboard.tsx` untouched.
+- `client/src/lib/api.ts` untouched — no new API methods added; `api.appointments.doctors()` and `api.appointments.updateStatus()` already existed.
+- `server/modules/appointment/index.ts` untouched.
+- No new npm dependencies added.
+- Desktop Day/Week/Month views, drag-and-drop, Details panel, and WhatsApp are all unaffected.
+
+### Build Results
+
+| Command | Result |
+|---------|--------|
+| `npx tsc --noEmit` | ✅ exit 0 |
+| `npx vite build` | ✅ no errors |
+| `npx tsc -p tsconfig.server.json` | ✅ exit 0 |
+
+### Known Limitations
+
+- **No mobile drag-and-drop** — rescheduling on mobile requires desktop or future dedicated mobile edit flow.
+- **No full mobile month/week calendar** — mobile shows day-by-day only; a month/week view is future work.
+- **Hard delete is desktop/admin-oriented** — mobile Cancel uses soft-delete (status → `cancelled`); DELETE endpoint is not exposed on mobile in this phase.
+- **Working hours are code constants** from Phase 4A — no mobile settings UI; Sunday and out-of-hours are enforced by the backend and surfaced as friendly errors.
+- **No mobile edit form** — full appointment editing (change date/time/doctor) still requires desktop. Documented as future work (Phase 4E or later).
+- **WhatsApp pre-filled text** is a static reminder string; rich templates (from the existing `api.whatsapp.sendAppointmentReminder`) are not wired up in this phase to avoid a dependency on WhatsApp connection state.
+
+---
+
 ## Future Phases (Not Yet Defined)
 
 To be filled in by product owner.
