@@ -243,6 +243,7 @@ export default function PatientFile({ user }: PatientFileProps) {
                                                                 onPrintRx={(data) => setPrintVisit(data)}
                                                                 onPrintLab={(data) => setPrintLabVisit(data)}
                                                                 onPrintNotes={(data) => setPrintNotesVisit(data)}
+                                                                onPrintReferral={(data) => setPrintReferral(data)}
                                                                 onClose={() => {
                                                                     setShowNewVisit(false);
                                                                     setActiveVisitId(null);
@@ -578,6 +579,7 @@ function VisitForm({
     onPrintRx,
     onPrintLab,
     onPrintNotes,
+    onPrintReferral,
     onClose,
 }: {
     visitId: string;
@@ -586,6 +588,7 @@ function VisitForm({
     onPrintRx: (data: any) => void;
     onPrintLab: (data: any) => void;
     onPrintNotes: (data: any) => void;
+    onPrintReferral: (data: any) => void;
     onClose: () => void;
 }) {
     const queryClient = useQueryClient();
@@ -892,7 +895,7 @@ function VisitForm({
                     <div className="flex gap-3">
                         <div className="flex-1">
                             <MultiSelectComboBox
-                                category="dental_finding"
+                                category="diagnosis"
                                 selectedItems={selectedFindings}
                                 onChange={setSelectedFindings}
                                 placeholder="Select finding..."
@@ -1216,7 +1219,7 @@ function VisitForm({
                                 <span key={ref.id} className="inline-flex items-center gap-2 bg-indigo-100 text-indigo-700 px-4 py-2 rounded-full text-sm font-semibold">
                                     🔄 {ref.referredTo} {ref.specialty ? `(${ref.specialty})` : ""}
                                     <button
-                                        onClick={() => setPrintReferral(ref)}
+                                        onClick={() => onPrintReferral(ref)}
                                         className="text-indigo-500 hover:text-indigo-700 text-sm"
                                         title="Print referral letter"
                                     >🖨️</button>

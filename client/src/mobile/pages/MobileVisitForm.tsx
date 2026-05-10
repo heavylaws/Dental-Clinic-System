@@ -81,7 +81,7 @@ export default function MobileVisitForm({ user }: { user: any }) {
   });
 
   const addFinding = useMutation({
-    mutationFn: (name: string) => api.visits.addFindingnosis(visitId!, { name }),
+    mutationFn: (name: string) => api.visits.addFinding(visitId!, { name }),
     onSuccess: (diag) => { setAddedFindings(p => [...p, diag]); setFindingInput(""); haptic.light(); },
   });
 
@@ -120,7 +120,7 @@ export default function MobileVisitForm({ user }: { user: any }) {
   });
 
   const deleteItem = async (type: string, id: string) => {
-    if (type === "diag") { await api.visits.deleteFindingnosis(id); setAddedFindings(p => p.filter(x => x.id !== id)); }
+    if (type === "diag") { await api.visits.deleteFinding(id); setAddedFindings(p => p.filter(x => x.id !== id)); }
     if (type === "med") { await api.visits.deletePrescription(id); setAddedMeds(p => p.filter(x => x.id !== id)); }
     if (type === "lab") { await api.visits.deleteLabOrder(id); setAddedLabs(p => p.filter(x => x.id !== id)); }
     if (type === "proc") { await api.visits.deleteProcedure(id); setAddedProcs(p => p.filter(x => x.id !== id)); }
