@@ -761,6 +761,126 @@ A lightweight **"🔔 Reminder"** button (purple tint) is added to each appointm
 
 ---
 
+## Phase 5B — Automatic Reminder Scheduler / Cron Rules
+
+**Status:** ✅ COMPLETE
+
+### Goal
+
+Automatically send appointment reminders based on built-in time rules, using the Phase 5A send/log foundation. No new external dependencies added.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `server/modules/reminder/core.ts` | **New** — `ReminderLog` type (extended), `demoReminderLogs` store, `sendAppointmentReminder()` shared function; extracted from `index.ts` to avoid circular imports |
+| `server/modules/reminder/scheduler.ts` | **New** — `setInterval`-based scheduler, 3 rules, idempotency check, `startReminderScheduler / stopReminderScheduler / runReminderSchedulerOnce`, singleton guard |
+| `server/modules/reminder/index.ts` | Refactored — re-exports from `core.ts`; adds `GET /scheduler/status` and `POST /scheduler/run-once` routes; `POST /send` now calls shared `sendAppointmentReminder()` |
+| `server/index.ts` | Imports `startReminderScheduler` and calls it after routes are mounted |
+| `client/src/lib/api.ts` | Added `api.reminders.schedulerStatus()` and `api.reminders.runSchedulerOnce()` |
+| `client/src/pages/Appointments.tsx` | Added `SchedulerStatusPanel` component; inserted inside `DetailsPanel` reminder section; mini-log now shows `auto` tag for automatic reminders |
+| `PRODUCT_PHASES.md` | This entry |
+
+### Scheduler Decision
+
+**`setInterval`-based — no `node-cron` dependency added.**
+
+Rationale: the project already has no `node-cron` in `package.json`. A simple `setInterval(60_000)` achieves the same minute-level granularity with zero new dependencies and no extra type declarations needed. The interval is `unref()`-ed so it never blocks clean Node exits.
+
+### Reminder Rules
+
+| Rule key | Fires at | Description |
+|----------|----------|-------------|
+| `day_before_18h` | 18:00 the day before | Evening advance notice |
+| `same_day_08h` | 08:00 on appointment day | Morning of appointment |
+| `two_hours_before` | Appt time − 2 hours | Short-lead reminder |
+
+Each rule has a **5-minute trigger window** so a once-per-minute poll will catch it even under slight timing jitter.
+
+### Idempotency / No-Duplicate Behavior
+
+A reminder is considered **already handled** if `demoReminderLogs` contains any entry matching `(appointmentId, channel, ruleKey)` — regardless of status (`sent`, `stubbed`, `failed`, `not_configured`).
+
+- **Failed reminders are not retried automatically** in Phase 5B — documented as a known limitation.
+- Manual reminders (Phase 5A) use `ruleKey: "manual"` and are never confused with automatic entries.
+- The singleton guard (`schedulerStarted` flag) prevents double-start on `tsx watch` hot-reload.
+
+### New ReminderLog Fields (Phase 5B)
+
+All three are optional — Phase 5A logs remain fully compatible.
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `ruleKey` | `string` | `"manual"` for manual sends; rule key for automatic |
+| `triggerType` | `"manual" \| "automatic"` | Origin of the send |
+| `dueAt` | `string` | ISO timestamp when the rule was due to fire |
+
+### New Endpoints
+
+#### `GET /api/reminders/scheduler/status` (auth required)
+
+```json
+{
+  "enabled": true,
+  "running": false,
+  "rules": [{ "key": "day_before_18h", "label": "...", "description": "..." }, ...],
+  "lastRunAt": "2026-05-10T...",
+  "lastRunSummary": { "checked": 12, "sent": 1, "skipped": 11, "failed": 0, "errors": [] }
+}
+```
+
+#### `POST /api/reminders/scheduler/run-once` (auth required)
+
+Triggers one scheduler pass immediately. Returns summary. Used for admin testing.
+
+### Scheduler Environment Variable
+
+| Variable | Default | Behavior |
+|----------|---------|----------|
+| `REMINDER_SCHEDULER_ENABLED=false` | — | Scheduler does not start |
+| _(not set)_ | enabled | Scheduler starts on server startup |
+
+Default is **enabled** — safe because idempotency prevents duplicate sends.
+
+### Desktop UI Changes (`Appointments.tsx`)
+
+Inside the `DetailsPanel` reminder section, below the mini reminder log:
+
+- **Auto-scheduler panel** shows:
+  - Enabled / disabled / running badge
+  - Last run timestamp + quick summary (✓sent ~skipped ✕failed)
+  - **"▶ Run scheduler now"** button — calls `POST /api/reminders/scheduler/run-once`, then refreshes status
+  - Result summary after run
+- Mini reminder log entries now show an `auto` tag when `triggerType === "automatic"`
+- Auto-refreshes every 30 seconds via `refetchInterval`
+- All existing actions (Edit, Confirm, Cancel, Delete, WhatsApp, Send Reminder) preserved
+- Drag-and-drop unaffected
+
+### Mobile Decision
+
+**No mobile changes.** The existing Phase 5A "🔔 Reminder" button continues to work unchanged. Scheduler controls are admin/desktop-only in Phase 5B.
+
+### Build Results
+
+| Command | Result |
+|---------|--------|
+| `npx tsc --noEmit` | ✅ exit 0 |
+| `npx vite build` | ✅ built in 7.74s |
+| `npx tsc -p tsconfig.server.json` | ✅ exit 0 |
+
+### Known Limitations
+
+- **Failed automatic reminders are not retried** — once any log exists for `(appointmentId, channel, ruleKey)`, the rule is permanently skipped for that triple. Retry logic is Phase 5C or later.
+- **Reminder log is still in-memory** — resets on server restart. DB migration deferred.
+- **SMS and email still stubbed** — `not_configured` status. Real providers are Phase 5C.
+- **WhatsApp requires connection** — falls back to `stubbed` + `wa.me` URL if client not connected.
+- **No patient opt-out** — preference fields not yet in schema (TODO: Phase 5C).
+- **Multi-instance deployments** — the in-memory singleton guard only works in single-process mode. Multi-instance needs DB-backed distributed lock for idempotency.
+- **No rule editing UI** — rules are code constants. A settings UI is future work.
+- **Rule windows are local-time** — `isDue()` uses `new Date()` local time. If the server timezone differs from the clinic timezone, fire times may be off. Set `TZ` env var to match clinic location.
+
+---
+
 ## Future Phases (Not Yet Defined)
 
 To be filled in by product owner.

@@ -27,6 +27,7 @@ import { recallsRouter } from "./modules/recalls/index.js";
 import { whatsappRouter } from "./modules/whatsapp/index.js";
 import { dashboardRouter } from "./modules/dashboard/index.js";
 import { reminderRouter } from "./modules/reminder/index.js";
+import { startReminderScheduler } from "./modules/reminder/scheduler.js";
 import { setupWebSocket } from "./ws.js";
 import { createAuditMiddleware, auditLog } from "./audit.js";
 import { demoSettings } from "./demo-store.js";
@@ -134,6 +135,12 @@ app.use("/api/recalls", recallsRouter);
 app.use("/api/whatsapp", whatsappRouter);
 app.use("/api/dashboard", dashboardRouter);
 app.use("/api/reminders", reminderRouter);
+
+// ─── Reminder Scheduler (Phase 5B) ─────────────────────────────────
+// Safe to start here — idempotency prevents duplicate sends on hot-reload.
+// Disable with REMINDER_SCHEDULER_ENABLED=false in .env
+
+startReminderScheduler();
 
 // ─── Static file serving for uploads ────────────────────────────────
 

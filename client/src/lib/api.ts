@@ -511,6 +511,31 @@ export const api = {
                 method: "POST",
                 body: JSON.stringify(payload),
             }),
+        schedulerStatus: () =>
+            request<{
+                enabled: boolean;
+                running: boolean;
+                rules: Array<{ key: string; label: string; description: string }>;
+                lastRunAt: string | null;
+                lastRunSummary: {
+                    checked: number;
+                    sent: number;
+                    skipped: number;
+                    failed: number;
+                    errors: string[];
+                } | null;
+            }>("/reminders/scheduler/status"),
+        runSchedulerOnce: () =>
+            request<{
+                success: boolean;
+                summary: {
+                    checked: number;
+                    sent: number;
+                    skipped: number;
+                    failed: number;
+                    errors: string[];
+                };
+            }>("/reminders/scheduler/run-once", { method: "POST" }),
     },
 
     // ─── AI ───────────────────────────────────────────────────────────

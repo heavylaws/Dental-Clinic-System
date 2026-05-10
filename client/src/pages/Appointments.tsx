@@ -1724,9 +1724,10 @@ function DetailsPanel({
                                             {log.status === "sent" ? "✓" : log.status === "stubbed" ? "~" : "✕"}
                                         </span>
                                         <span className="font-semibold capitalize">{log.channel}</span>
-                                        <span className="opacity-75">
-                                            {log.status}
-                                        </span>
+                                        <span className="opacity-75">{log.status}</span>
+                                        {log.triggerType === "automatic" && (
+                                            <span className="opacity-50 italic">auto</span>
+                                        )}
                                         <span className="ml-auto font-mono opacity-60 shrink-0">
                                             {log.sentAt ? new Date(log.sentAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
                                         </span>
@@ -1735,6 +1736,9 @@ function DetailsPanel({
                             </div>
                         </div>
                     )}
+
+                    {/* Phase 5B: scheduler status + run-once */}
+                    <SchedulerStatusPanel />
                 </div>
             </div>
         </div>
@@ -1748,6 +1752,66 @@ function Row({ label, value, mono }: { label: string; value: string; mono?: bool
                 {label}
             </span>
             <span className={`text-gray-700 break-words ${mono ? "font-mono" : ""}`}>{value}</span>
+        </div>
+    );
+}
+
+// ─── Scheduler Status Panel (Phase 5B) ──────────────────────────────
+
+function SchedulerStatusPanel() {
+    const { data: status, refetch, isFetching } = useQuery({
+        queryKey: ["reminder-scheduler-status"],
+        queryFn: () => api.reminders.schedulerStatus(),
+        refetchInterval: 30_000,
+    });
+
+    const runOnceMutation = useMutation({
+        mutationFn: () => api.reminders.runSchedulerOnce(),
+        onSettled: () => void refetch(),
+    });
+
+    if (!status) return null;
+
+    const s = status.lastRunSummary;
+
+    return (
+        <div className="mt-4 border-t border-gray-100 pt-4">
+            <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-bold uppercase tracking-wide text-gray-400">
+                    Auto-scheduler
+                </span>
+                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${
+                    status.enabled ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500"
+                }`}>
+                    {status.enabled ? (status.running ? "running" : "enabled") : "disabled"}
+                </span>
+            </div>
+
+            {status.lastRunAt && (
+                <p className="text-[11px] text-gray-400 mb-2">
+                    Last run: {new Date(status.lastRunAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                    {s && (
+                        <span className="ml-2 opacity-75">
+                            ✓{s.sent} ~{s.skipped} ✕{s.failed}
+                        </span>
+                    )}
+                </p>
+            )}
+
+            <button
+                type="button"
+                onClick={() => runOnceMutation.mutate()}
+                disabled={runOnceMutation.isPending || isFetching}
+                className="w-full px-3 py-1.5 text-xs font-semibold bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 transition disabled:opacity-50 text-gray-600"
+            >
+                {runOnceMutation.isPending ? "Running…" : "▶ Run scheduler now"}
+            </button>
+
+            {runOnceMutation.data && (
+                <p className="text-[11px] mt-1.5 text-gray-500">
+                    Done — sent: {runOnceMutation.data.summary.sent}, skipped: {runOnceMutation.data.summary.skipped}, failed: {runOnceMutation.data.summary.failed}
+                </p>
+            )}
         </div>
     );
 }
