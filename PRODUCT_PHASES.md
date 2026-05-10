@@ -339,6 +339,120 @@ This section documents the fixes applied to resolve manual testing issues:
 
 ---
 
+## Phase 4B — Desktop Calendar UX Upgrade
+
+**Status:** ✅ COMPLETE
+
+### Goal
+Turn the desktop appointment page into a premium clinic-grade scheduling tool: day/week/month views, multi-filter, color-coded status, polished cards, and a click-to-open details panel — without weakening the Phase 4A safety rules and without touching the mobile UI. Drag-and-drop is intentionally deferred to Phase 4C.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `client/src/pages/Appointments.tsx` | Full UI rewrite. New `month` view, polished `day` and `week` views, segmented view switcher, multi-filter toolbar (doctor/status/type) with "Clear filters", date picker, color legend, polished `<AppointmentCard>`, click-to-open `<DetailsPanel>` modal with quick status actions (Confirm/Complete/Cancel/Edit/Delete/WhatsApp), per-view empty states, responsive grids and overflow control. All Phase 4A safety wiring preserved |
+| `PRODUCT_PHASES.md` | This entry |
+
+### View Switcher
+
+Segmented control: **Day · Week · Month**. The previously default `day` view remains the default.
+
+- **Day** — 30-minute slots from `08:00` to `19:30`. Empty slots clickable to create at that time. The slot column shows a faint `+` button on hover for explicit-add affordance.
+- **Week** — Mon–Sun grid (Mon-first), hour rows, compact cards, Sunday column tinted gray + labeled `closed`, today's column tinted primary, sticky time column on horizontal scroll.
+- **Month** — Mon–Sun grid covering the full visible month range (~6 weeks). Each cell shows the day number, the appointment count, up to **3** appointment chips, and a `+N more` indicator. Today is highlighted with a circled day number and a primary inset ring. Days outside the current month are dimmed. Clicking a cell selects that date and switches to **Day** view.
+
+### Navigation
+
+- **Previous / Today / Next** controls plus a **date picker** input.
+- Previous/Next moves by **±1 day**, **±7 days**, or **±1 month** depending on the active view. **Today** snaps to the current date.
+
+### Filters
+
+Three independent client-side filters that affect only what's visible (server data is never mutated):
+
+- **Doctor** — populated from `api.appointments.doctors()` plus an "All doctors" option.
+- **Status** — fixed list: Scheduled, Confirmed, Completed, Cancelled, No-show.
+- **Type** — derived dynamically from the visible range's appointment data so newly added types show up automatically.
+
+A `Clear filters` button appears whenever any filter is active.
+
+### Color Legend
+
+Inline legend bar above the calendar showing:
+- **Status dots** for each status with its label (uses `STATUS_META`).
+- **Doctor accent stripes** (left-border colors): Dr. Mohammed (blue), Dr. Layla (purple).
+
+### Appointment Cards
+
+`<AppointmentCard>` is used in both Day and Week views and shows: patient name, time (mono), duration, type chip, status badge (in non-compact mode), doctor name (italic), and a doctor-color left border. Whole card is a single button that opens the details panel; hover lifts and brightens.
+
+In **Month** view, cards are inline mini-chips with `time` + `patient name` and the same color/accent system.
+
+### Details Panel
+
+Single click on any appointment chip opens a modal `<DetailsPanel>` showing:
+
+- Patient name, date • time • duration
+- Status pill + Type pill
+- Detail rows: Doctor, Phone, Notes (if any)
+- **Quick status actions** (only if not already cancelled/completed):
+  - **Confirm** (when status is `scheduled`) → `PATCH /api/appointments/:id/status` with `confirmed`
+  - **Complete** (when `scheduled`/`confirmed`) → status `completed`
+  - **Cancel** → status `cancelled` with `window.confirm`
+- **Tools**: Edit (opens existing form dialog with `formError` reset), WhatsApp reminder (only if phone present), Delete (hard-delete via `DELETE /api/appointments/:id` with `window.confirm`).
+
+All routes used by the panel are the Phase 4A endpoints — no new client APIs were added.
+
+### Empty States
+
+Distinct empty states per view:
+- **Day**: `No appointments scheduled` with a CTA button.
+- **Week**: `No appointments this week` with a CTA button.
+- **Month**: `No appointments in <Month Year>` with a CTA button.
+- When filters hide everything, an amber inline banner reads `No appointments match your filters …` so users can tell it's a filter effect, not an empty schedule.
+
+### Responsive Desktop Behavior
+
+- Top-level page uses `max-w-7xl mx-auto px-4 sm:px-6 py-8`.
+- Toolbar is `flex flex-wrap` so filters wrap below on narrow viewports.
+- Week view wraps in `overflow-x-auto` with a `min-w-[760px]` grid + sticky time column.
+- Month view uses `grid grid-cols-7` with day cells `min-h-[110px]`. Excess events collapse to `+N more` instead of overflowing.
+- Dialogs use `max-h-[92vh] overflow-y-auto` so long forms scroll.
+
+### Phase 4A Safety Preserved
+
+- Error banner inside the create/edit dialog still differentiates **doctor_conflict**, **patient_conflict**, **working-hours**, and **generic** (rose / amber / neutral).
+- `createMutation` and `updateMutation` still hit `POST /` and `PUT /:id` which run working-hours + conflict (doctor + patient) validation server-side.
+- `statusMutation` uses `api.appointments.updateStatus` → `PATCH /:id/status` for cancellation/confirmation/completion. No schedule re-validation, by design.
+- `deleteMutation` uses `DELETE /:id`. Both Cancel and Delete go through `window.confirm` first.
+- Sunday and out-of-hours rules still enforced by the backend; UI surfaces the message in the banner.
+
+### Mobile Regression Note
+
+- **Zero** files modified under `client/src/mobile/` — verified via `git status --short` (only `client/src/pages/Appointments.tsx` and `PRODUCT_PHASES.md` are dirty).
+- `MobileAppointments.tsx` still calls `api.appointments.list/updateStatus/create` with unchanged signatures.
+- `vite build` passes which guarantees the full client bundle (including mobile routes under `/m`) compiles.
+- Mobile UX remains unchanged — its polish is intentionally deferred to Phase 4D.
+
+### Build Results
+
+| Command | Result |
+|---------|--------|
+| `npx vite build` | ✅ `✓ built in 7.66s` — no errors |
+| `npx tsc -p tsconfig.server.json` | ✅ exit 0 — no errors |
+
+### Known Limitations
+
+- **Drag-and-drop is deferred to Phase 4C** by design — clicks open the details panel; rescheduling still requires Edit.
+- Working hours are still **code constants** from Phase 4A — no settings UI.
+- **Per-doctor schedules** and **chair/room conflicts** are still future work (likely Phase 4E or later).
+- **Mobile appointment UX polish** is deferred to Phase 4D.
+- Month view caps at 3 chips per day + "+N more" — there is no inline expander; users click the day to jump to Day view for the full list.
+- Type filter options are derived from the visible range only; uncommon types may not appear in the dropdown until they're loaded into the current view.
+- Week view's hour rows are 60-minute lines (showing 30-minute slots stacked) to keep the table compact; the underlying scheduler still allows any 30-minute slot via the dialog.
+
+---
+
 ## Future Phases (Not Yet Defined)
 
 To be filled in by product owner.

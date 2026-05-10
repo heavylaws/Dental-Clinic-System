@@ -1,7 +1,16 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
-import { format, addDays, startOfWeek, endOfWeek, isSameDay, parseISO } from "date-fns";
+import {
+    format,
+    addDays,
+    addMonths,
+    startOfWeek,
+    endOfWeek,
+    startOfMonth,
+    endOfMonth,
+    isSameMonth,
+} from "date-fns";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -24,22 +33,75 @@ const TIME_SLOTS = Array.from({ length: 24 }, (_, i) => {
     const h = Math.floor(i / 2) + 8;
     const m = i % 2 === 0 ? "00" : "30";
     return `${h.toString().padStart(2, "0")}:${m}`;
-}).filter((t) => t >= "08:00" && t <= "19:30");
+}).filter((t) => t >= "08:00" && t <= "17:30");
 
-const STATUS_COLORS: Record<string, string> = {
-    scheduled: "bg-blue-100 text-blue-700 border-blue-200",
-    confirmed: "bg-emerald-100 text-emerald-700 border-emerald-200",
-    cancelled: "bg-red-100 text-red-500 border-red-200 line-through opacity-60",
-    completed: "bg-gray-100 text-gray-500 border-gray-200",
+function isSundayDate(dateStr: string): boolean {
+    const [y, m, d] = dateStr.split("-").map(Number);
+    return new Date(y, m - 1, d).getDay() === 0;
+}
+
+// ─── Status & type metadata ─────────────────────────────────────────
+
+const STATUS_META: Record<string, { label: string; chip: string; dot: string; badge: string }> = {
+    scheduled: {
+        label: "Scheduled",
+        chip: "bg-blue-50 text-blue-700 border-blue-200",
+        dot: "bg-blue-500",
+        badge: "bg-blue-100 text-blue-700",
+    },
+    confirmed: {
+        label: "Confirmed",
+        chip: "bg-emerald-50 text-emerald-700 border-emerald-200",
+        dot: "bg-emerald-500",
+        badge: "bg-emerald-100 text-emerald-700",
+    },
+    completed: {
+        label: "Completed",
+        chip: "bg-gray-50 text-gray-500 border-gray-200",
+        dot: "bg-gray-400",
+        badge: "bg-gray-100 text-gray-500",
+    },
+    cancelled: {
+        label: "Cancelled",
+        chip: "bg-rose-50 text-rose-500 border-rose-200 line-through opacity-70",
+        dot: "bg-rose-400",
+        badge: "bg-rose-100 text-rose-500",
+    },
+    no_show: {
+        label: "No-show",
+        chip: "bg-amber-50 text-amber-700 border-amber-200",
+        dot: "bg-amber-500",
+        badge: "bg-amber-100 text-amber-700",
+    },
 };
+function statusKey(s: string): keyof typeof STATUS_META {
+    const k = String(s || "").toLowerCase().replace("-", "_");
+    return (k in STATUS_META ? k : "scheduled") as keyof typeof STATUS_META;
+}
+function statusMeta(s: string) {
+    return STATUS_META[statusKey(s)];
+}
 
-// Color-code appointments by doctor
+const TYPE_META: Record<string, { label: string; tint: string }> = {
+    consultation: { label: "Consultation", tint: "bg-sky-50 text-sky-700" },
+    "follow-up": { label: "Follow-up", tint: "bg-violet-50 text-violet-700" },
+    procedure: { label: "Procedure", tint: "bg-teal-50 text-teal-700" },
+    emergency: { label: "Emergency", tint: "bg-rose-50 text-rose-700" },
+};
+function typeMeta(t: string) {
+    const key = String(t || "").toLowerCase();
+    return TYPE_META[key] || { label: t || "—", tint: "bg-gray-100 text-gray-600" };
+}
+
 const DOCTOR_ACCENT: Record<string, string> = {
     "2": "border-l-4 border-l-blue-500",
     "4": "border-l-4 border-l-purple-500",
 };
+function doctorAccent(id?: string) {
+    return (id && DOCTOR_ACCENT[id]) || "border-l-4 border-l-gray-300";
+}
 
-const VIEWS = ["day", "week"] as const;
+const VIEWS = ["day", "week", "month"] as const;
 type ViewMode = (typeof VIEWS)[number];
 
 // ─── Main Component ─────────────────────────────────────────────────
@@ -50,7 +112,12 @@ export default function Appointments() {
     const [view, setView] = useState<ViewMode>("day");
     const [showDialog, setShowDialog] = useState(false);
     const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
+    const [selectedAppt, setSelectedAppt] = useState<Appointment | null>(null);
+
+    // Filters (client-side; do not mutate server data)
     const [doctorFilter, setDoctorFilter] = useState<string>("");
+    const [statusFilter, setStatusFilter] = useState<string>("");
+    const [typeFilter, setTypeFilter] = useState<string>("");
 
     // Search state for patient picker
     const [searchQuery, setSearchQuery] = useState("");
@@ -64,17 +131,23 @@ export default function Appointments() {
     const [formNotes, setFormNotes] = useState("");
     const [formDoctorId, setFormDoctorId] = useState<string>("2");
 
-    // Query dates
+    // Range derivation per view
     const dateStr = format(currentDate, "yyyy-MM-dd");
     const weekStart = format(startOfWeek(currentDate, { weekStartsOn: 1 }), "yyyy-MM-dd");
     const weekEnd = format(endOfWeek(currentDate, { weekStartsOn: 1 }), "yyyy-MM-dd");
+    const monthStart = startOfMonth(currentDate);
+    const monthEnd = endOfMonth(currentDate);
+    const monthGridStart = format(startOfWeek(monthStart, { weekStartsOn: 1 }), "yyyy-MM-dd");
+    const monthGridEnd = format(endOfWeek(monthEnd, { weekStartsOn: 1 }), "yyyy-MM-dd");
 
-    const { data: appointments = [], isLoading } = useQuery({
-        queryKey: ["appointments", view, view === "day" ? dateStr : weekStart, doctorFilter],
-        queryFn: () =>
-            view === "day"
-                ? api.appointments.list(dateStr, doctorFilter || undefined)
-                : api.appointments.range(weekStart, weekEnd, doctorFilter || undefined),
+    const [rangeFrom, rangeTo] =
+        view === "day" ? [dateStr, dateStr]
+            : view === "week" ? [weekStart, weekEnd]
+                : [monthGridStart, monthGridEnd];
+
+    const { data: appointments = [], isLoading } = useQuery<Appointment[]>({
+        queryKey: ["appointments", rangeFrom, rangeTo],
+        queryFn: () => api.appointments.range(rangeFrom, rangeTo),
     });
 
     const { data: doctorList = [] } = useQuery({
@@ -143,15 +216,20 @@ export default function Appointments() {
     const statusMutation = useMutation({
         mutationFn: ({ id, status }: { id: string; status: string }) =>
             api.appointments.updateStatus(id, status),
-        onSuccess: () => queryClient.invalidateQueries({ queryKey: ["appointments"] }),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["appointments"] });
+            setSelectedAppt(null);
+        },
     });
 
     const deleteMutation = useMutation({
         mutationFn: (id: string) => api.appointments.delete(id),
-        onSuccess: () => queryClient.invalidateQueries({ queryKey: ["appointments"] }),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["appointments"] });
+            setSelectedAppt(null);
+        },
         onError: (e: any) => {
-            const message: string = e?.message || "Failed to delete appointment.";
-            setFormError({ kind: "generic", message });
+            alert(e?.message || "Failed to delete appointment.");
         },
     });
 
@@ -179,9 +257,14 @@ export default function Appointments() {
         setFormType(appt.type);
         setFormNotes(appt.notes || "");
         setFormDoctorId(appt.doctorId || doctorFilter || doctorList[0]?.id || "2");
-        setSelectedPatient({ id: appt.patientId, firstName: appt.patientName.split(" ")[0], lastName: appt.patientName.split(" ").slice(1).join(" ") });
+        setSelectedPatient({
+            id: appt.patientId,
+            firstName: (appt.patientName || "").split(" ")[0],
+            lastName: (appt.patientName || "").split(" ").slice(1).join(" "),
+        });
         setSearchQuery("");
         setFormError(null);
+        setSelectedAppt(null);
         setShowDialog(true);
     }
 
@@ -216,7 +299,26 @@ export default function Appointments() {
     }
 
     function navigateDate(delta: number) {
-        setCurrentDate((d) => addDays(d, view === "week" ? delta * 7 : delta));
+        setCurrentDate((d) => {
+            if (view === "month") return addMonths(d, delta);
+            if (view === "week") return addDays(d, delta * 7);
+            return addDays(d, delta);
+        });
+    }
+
+    function handleCancelAppt(appt: Appointment) {
+        if (!window.confirm(`Cancel appointment for ${appt.patientName}?`)) return;
+        statusMutation.mutate({ id: appt.id, status: "cancelled" });
+    }
+    function handleDeleteAppt(appt: Appointment) {
+        if (!window.confirm(`Delete this appointment permanently? This cannot be undone.`)) return;
+        deleteMutation.mutate(appt.id);
+    }
+    function handleConfirmAppt(appt: Appointment) {
+        statusMutation.mutate({ id: appt.id, status: "confirmed" });
+    }
+    function handleCompleteAppt(appt: Appointment) {
+        statusMutation.mutate({ id: appt.id, status: "completed" });
     }
 
     const waMutation = useMutation({
@@ -233,8 +335,35 @@ export default function Appointments() {
     });
 
     function sendWaReminder(appt: Appointment) {
-        if (!appt.patientPhone) { alert("No phone number on file"); return; }
+        if (!appt.patientPhone) {
+            alert("No phone number on file");
+            return;
+        }
         waMutation.mutate(appt);
+    }
+
+    // ─── Filter options ─────────────────────────────────────────────
+
+    const typeOptions = useMemo(() => {
+        const set = new Set<string>();
+        for (const a of appointments) if (a.type) set.add(a.type);
+        return Array.from(set).sort();
+    }, [appointments]);
+
+    const filteredAppointments = useMemo(() => {
+        return appointments.filter((a) => {
+            if (doctorFilter && a.doctorId !== doctorFilter) return false;
+            if (statusFilter && statusKey(a.status) !== statusFilter) return false;
+            if (typeFilter && a.type !== typeFilter) return false;
+            return true;
+        });
+    }, [appointments, doctorFilter, statusFilter, typeFilter]);
+
+    const anyFilterActive = !!(doctorFilter || statusFilter || typeFilter);
+    function clearFilters() {
+        setDoctorFilter("");
+        setStatusFilter("");
+        setTypeFilter("");
     }
 
     // ─── Week days ──────────────────────────────────────────────────
@@ -247,10 +376,15 @@ export default function Appointments() {
     // ─── Render ─────────────────────────────────────────────────────
 
     return (
-        <div className="max-w-7xl mx-auto px-6 py-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
             {/* ─── Header ─── */}
-            <div className="flex items-center justify-between mb-8">
-                <h1 className="text-3xl font-extrabold text-gray-900">📅 Appointments</h1>
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+                <div>
+                    <h1 className="text-3xl font-extrabold text-gray-900">📅 Appointments</h1>
+                    <p className="text-sm text-gray-500 mt-1">
+                        Day, week & month scheduling — color-coded by status, drag-free for now.
+                    </p>
+                </div>
                 <button
                     onClick={() => openCreate()}
                     className="px-5 py-2.5 bg-primary-600 text-white font-bold rounded-xl hover:bg-primary-700 transition shadow-sm"
@@ -259,16 +393,17 @@ export default function Appointments() {
                 </button>
             </div>
 
-            {/* ─── Controls ─── */}
-            <div className="flex items-center gap-4 mb-6">
-                <div className="flex bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+            {/* ─── Toolbar ─── */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 mb-4 flex flex-wrap items-center gap-3">
+                {/* View switcher */}
+                <div className="flex bg-gray-50 rounded-xl border border-gray-200 overflow-hidden">
                     {VIEWS.map((v) => (
                         <button
                             key={v}
                             onClick={() => setView(v)}
                             className={`px-4 py-2 text-sm font-semibold capitalize transition ${view === v
-                                ? "bg-primary-600 text-white"
-                                : "text-gray-600 hover:bg-gray-50"
+                                ? "bg-primary-600 text-white shadow-inner"
+                                : "text-gray-600 hover:bg-white"
                                 }`}
                         >
                             {v}
@@ -276,10 +411,12 @@ export default function Appointments() {
                     ))}
                 </div>
 
-                <div className="flex items-center gap-2">
+                {/* Navigation */}
+                <div className="flex items-center gap-1.5">
                     <button
                         onClick={() => navigateDate(-1)}
                         className="w-9 h-9 flex items-center justify-center rounded-lg bg-white border border-gray-200 hover:bg-gray-50 transition text-lg font-bold text-gray-600"
+                        title="Previous"
                     >
                         ‹
                     </button>
@@ -292,32 +429,86 @@ export default function Appointments() {
                     <button
                         onClick={() => navigateDate(1)}
                         className="w-9 h-9 flex items-center justify-center rounded-lg bg-white border border-gray-200 hover:bg-gray-50 transition text-lg font-bold text-gray-600"
+                        title="Next"
                     >
                         ›
                     </button>
                 </div>
 
-                <h2 className="text-lg font-bold text-gray-700">
+                {/* Date picker */}
+                <input
+                    type="date"
+                    value={dateStr}
+                    onChange={(e) => {
+                        if (e.target.value) {
+                            const [y, m, d] = e.target.value.split("-").map(Number);
+                            setCurrentDate(new Date(y, m - 1, d));
+                        }
+                    }}
+                    className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm font-semibold focus:ring-2 focus:ring-primary-300 outline-none bg-white"
+                />
+
+                <h2 className="text-lg font-bold text-gray-700 ml-2">
                     {view === "day"
                         ? format(currentDate, "EEEE, MMMM d, yyyy")
-                        : `${format(weekDays[0], "MMM d")} – ${format(weekDays[6], "MMM d, yyyy")}`}
+                        : view === "week"
+                            ? `${format(weekDays[0], "MMM d")} – ${format(weekDays[6], "MMM d, yyyy")}`
+                            : format(currentDate, "MMMM yyyy")}
                 </h2>
 
-                <div className="ml-auto">
+                {/* Filters (right side) */}
+                <div className="ml-auto flex flex-wrap items-center gap-2">
                     <select
                         value={doctorFilter}
                         onChange={(e) => setDoctorFilter(e.target.value)}
-                        className="border border-gray-200 rounded-xl px-3 py-2 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary-300 bg-white shadow-sm"
+                        className="border border-gray-200 rounded-xl px-3 py-1.5 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary-300 bg-white"
+                        title="Filter by doctor"
                     >
-                        <option value="">All Doctors</option>
+                        <option value="">All doctors</option>
                         {doctorList.map((d) => (
                             <option key={d.id} value={d.id}>{d.name}</option>
                         ))}
                     </select>
+
+                    <select
+                        value={statusFilter}
+                        onChange={(e) => setStatusFilter(e.target.value)}
+                        className="border border-gray-200 rounded-xl px-3 py-1.5 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary-300 bg-white"
+                        title="Filter by status"
+                    >
+                        <option value="">All statuses</option>
+                        {(Object.keys(STATUS_META) as Array<keyof typeof STATUS_META>).map((s) => (
+                            <option key={s} value={s}>{STATUS_META[s].label}</option>
+                        ))}
+                    </select>
+
+                    <select
+                        value={typeFilter}
+                        onChange={(e) => setTypeFilter(e.target.value)}
+                        className="border border-gray-200 rounded-xl px-3 py-1.5 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary-300 bg-white"
+                        title="Filter by type"
+                    >
+                        <option value="">All types</option>
+                        {typeOptions.map((t) => (
+                            <option key={t} value={t}>{typeMeta(t).label}</option>
+                        ))}
+                    </select>
+
+                    {anyFilterActive && (
+                        <button
+                            onClick={clearFilters}
+                            className="px-2.5 py-1.5 text-xs font-semibold text-gray-500 hover:text-gray-700 underline-offset-2 hover:underline"
+                        >
+                            Clear filters
+                        </button>
+                    )}
                 </div>
             </div>
 
-            {/* ─── Calendar Grid ─── */}
+            {/* ─── Legend ─── */}
+            <Legend />
+
+            {/* ─── View ─── */}
             {isLoading ? (
                 <div className="flex justify-center p-12">
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600" />
@@ -325,39 +516,65 @@ export default function Appointments() {
             ) : view === "day" ? (
                 <DayView
                     date={dateStr}
-                    appointments={appointments}
+                    appointments={filteredAppointments}
                     onSlotClick={(time: string) => openCreate(dateStr, time)}
-                    onEdit={openEdit}
-                    onStatusChange={(id: string, status: string) => statusMutation.mutate({ id, status })}
-                    onDelete={(id: string) => {
-                        if (!window.confirm("Delete this appointment permanently?")) return;
-                        setFormError(null);
-                        deleteMutation.mutate(id);
-                    }}
-                    sendWaReminder={sendWaReminder}
+                    onApptClick={setSelectedAppt}
+                    onCreateAny={() => openCreate()}
+                    anyFilterActive={anyFilterActive}
                 />
-            ) : (
+            ) : view === "week" ? (
                 <WeekView
                     weekDays={weekDays}
-                    appointments={appointments}
+                    appointments={filteredAppointments}
                     onSlotClick={(date: string, time: string) => openCreate(date, time)}
-                    onEdit={openEdit}
-                    onStatusChange={(id: string, status: string) => statusMutation.mutate({ id, status })}
+                    onApptClick={setSelectedAppt}
+                    onCreateAny={() => openCreate()}
+                    anyFilterActive={anyFilterActive}
+                />
+            ) : (
+                <MonthView
+                    currentDate={currentDate}
+                    monthGridStart={monthGridStart}
+                    monthGridEnd={monthGridEnd}
+                    appointments={filteredAppointments}
+                    onDayClick={(d: string) => {
+                        const [y, m, dd] = d.split("-").map(Number);
+                        setCurrentDate(new Date(y, m - 1, dd));
+                        setView("day");
+                    }}
+                    onApptClick={setSelectedAppt}
+                    onCreateAny={() => openCreate()}
+                    anyFilterActive={anyFilterActive}
                 />
             )}
 
-            {/* ─── Dialog ─── */}
+            {/* ─── Details panel (modal) ─── */}
+            {selectedAppt && (
+                <DetailsPanel
+                    appt={selectedAppt}
+                    onClose={() => setSelectedAppt(null)}
+                    onEdit={openEdit}
+                    onConfirm={handleConfirmAppt}
+                    onComplete={handleCompleteAppt}
+                    onCancel={handleCancelAppt}
+                    onDelete={handleDeleteAppt}
+                    onWhatsApp={sendWaReminder}
+                    pending={statusMutation.isPending || deleteMutation.isPending}
+                />
+            )}
+
+            {/* ─── Create/Edit Dialog ─── */}
             {showDialog && (
-                <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={closeDialog}>
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
-                        <h3 className="text-xl font-bold text-gray-900 mb-4">
+                <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={closeDialog}>
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                        <h3 className="text-xl font-bold text-gray-900 mb-1">
                             {editingAppointment ? "Edit Appointment" : "New Appointment"}
                         </h3>
                         <p className="text-xs text-gray-500 mb-4">
-                            Tip: click empty slots or use + in the calendar grid to create quickly.
+                            Tip: click empty slots in day/week views to create at a specific time.
                         </p>
 
-                        {/* Error banner (doctor conflict / patient conflict / working-hours / generic) */}
+                        {/* Error banner */}
                         {formError && (
                             <div
                                 role="alert"
@@ -393,7 +610,7 @@ export default function Appointments() {
                         )}
 
                         <form onSubmit={handleSubmit} className="space-y-4">
-                            {/* Patient Picker */}
+                            {/* Patient picker */}
                             <div>
                                 <label className="block text-sm font-semibold text-gray-700 mb-1">Patient</label>
                                 {selectedPatient ? (
@@ -555,42 +772,165 @@ export default function Appointments() {
     );
 }
 
+// ─── Legend ─────────────────────────────────────────────────────────
+
+function Legend() {
+    return (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-4 px-4 py-2.5 bg-white rounded-xl border border-gray-100 shadow-sm text-xs">
+            <span className="font-semibold text-gray-500 mr-1">Status:</span>
+            {(Object.keys(STATUS_META) as Array<keyof typeof STATUS_META>).map((s) => (
+                <span key={s} className="inline-flex items-center gap-1.5 text-gray-600">
+                    <span className={`w-2.5 h-2.5 rounded-full ${STATUS_META[s].dot}`} />
+                    {STATUS_META[s].label}
+                </span>
+            ))}
+            <span className="hidden sm:inline mx-2 h-4 w-px bg-gray-200" />
+            <span className="font-semibold text-gray-500 mr-1">Doctor:</span>
+            <span className="inline-flex items-center gap-1.5 text-gray-600">
+                <span className="w-1 h-3.5 rounded bg-blue-500" /> Dr. Mohammed
+            </span>
+            <span className="inline-flex items-center gap-1.5 text-gray-600">
+                <span className="w-1 h-3.5 rounded bg-purple-500" /> Dr. Layla
+            </span>
+        </div>
+    );
+}
+
+// ─── Empty State ────────────────────────────────────────────────────
+
+function EmptyState({
+    title,
+    body,
+    onCreate,
+    showFilters,
+}: {
+    title: string;
+    body?: string;
+    onCreate: () => void;
+    showFilters?: boolean;
+}) {
+    return (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-12 text-center">
+            <div className="text-5xl mb-3">📅</div>
+            <h3 className="text-lg font-bold text-gray-800 mb-1">{title}</h3>
+            {body && <p className="text-sm text-gray-500 mb-4">{body}</p>}
+            {showFilters && (
+                <p className="text-xs text-gray-400 mb-3">
+                    Some appointments may be hidden by your active filters.
+                </p>
+            )}
+            <button
+                onClick={onCreate}
+                className="px-5 py-2 bg-primary-600 text-white font-semibold rounded-xl hover:bg-primary-700 transition shadow-sm"
+            >
+                + Create appointment
+            </button>
+        </div>
+    );
+}
+
+// ─── Appointment Card (used in day/week) ────────────────────────────
+
+function AppointmentCard({
+    appt,
+    onClick,
+    compact = false,
+}: {
+    appt: Appointment;
+    onClick: () => void;
+    compact?: boolean;
+}) {
+    const sm = statusMeta(appt.status);
+    const tm = typeMeta(appt.type);
+    return (
+        <button
+            type="button"
+            onClick={(e) => {
+                e.stopPropagation();
+                onClick();
+            }}
+            className={`group w-full text-left rounded-lg border ${sm.chip} ${doctorAccent(appt.doctorId)} px-2.5 py-1.5 text-sm hover:shadow-md hover:-translate-y-0.5 transition`}
+            title={`${appt.patientName} • ${appt.timeSlot} • ${tm.label} • ${sm.label}`}
+        >
+            <div className="flex items-center justify-between gap-2">
+                <span className="font-bold truncate">{appt.patientName || "—"}</span>
+                {!compact && (
+                    <span className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded ${sm.badge}`}>
+                        {sm.label}
+                    </span>
+                )}
+            </div>
+            <div className="flex items-center gap-2 text-[11px] mt-0.5 opacity-80">
+                <span className="font-mono">{appt.timeSlot}</span>
+                {appt.duration ? <span className="opacity-75">{appt.duration}m</span> : null}
+                {!compact && <span className={`px-1.5 py-0.5 rounded ${tm.tint}`}>{tm.label}</span>}
+            </div>
+            {!compact && appt.doctorName && (
+                <div className="text-[11px] mt-0.5 opacity-70 italic truncate">{appt.doctorName}</div>
+            )}
+        </button>
+    );
+}
+
 // ─── Day View ───────────────────────────────────────────────────────
 
 function DayView({
     date,
     appointments,
     onSlotClick,
-    onEdit,
-    onStatusChange,
-    onDelete,
-    sendWaReminder,
+    onApptClick,
+    onCreateAny,
+    anyFilterActive,
 }: {
     date: string;
     appointments: Appointment[];
     onSlotClick: (time: string) => void;
-    onEdit: (appt: Appointment) => void;
-    onStatusChange: (id: string, status: string) => void;
-    onDelete: (id: string) => void;
-    sendWaReminder: (appt: Appointment) => void;
+    onApptClick: (appt: Appointment) => void;
+    onCreateAny: () => void;
+    anyFilterActive: boolean;
 }) {
+    const dayAppts = appointments.filter((a) => a.appointmentDate === date);
+    const isSunday = isSundayDate(date);
+
+    if (!isSunday && dayAppts.length === 0 && !anyFilterActive) {
+        return (
+            <EmptyState
+                title="No appointments scheduled"
+                body="Click any time slot below to add a new appointment, or use the button to start fresh."
+                onCreate={onCreateAny}
+            />
+        );
+    }
+
     return (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+            {isSunday && (
+                <div className="px-4 py-3 text-sm text-gray-600 bg-gray-50 border-b border-gray-200 font-semibold">
+                    Sunday is closed. New appointments cannot be created for this day.
+                </div>
+            )}
+            {anyFilterActive && dayAppts.length === 0 && (
+                <div className="px-4 py-3 text-sm text-gray-500 bg-amber-50 border-b border-amber-100">
+                    No appointments match your filters for this day.
+                </div>
+            )}
             {TIME_SLOTS.map((time) => {
-                const slotAppts = appointments.filter((a) => a.timeSlot === time);
+                const slotAppts = dayAppts.filter((a) => a.timeSlot === time);
                 return (
                     <div
                         key={time}
-                        className="flex border-b border-gray-100 hover:bg-gray-50/50 transition cursor-pointer min-h-[52px]"
-                        onClick={() => slotAppts.length === 0 && onSlotClick(time)}
+                        className={`flex border-b border-gray-100 last:border-b-0 transition min-h-[56px] ${isSunday ? "bg-gray-50/60 cursor-not-allowed" : "hover:bg-gray-50/50 cursor-pointer"}`}
+                        onClick={() => !isSunday && slotAppts.length === 0 && onSlotClick(time)}
                     >
-                        <div className="w-24 flex-shrink-0 px-3 py-2 text-sm font-semibold text-gray-400 border-r border-gray-100 flex items-center justify-between gap-1">
-                            <span>{time}</span>
+                        <div className="w-20 sm:w-24 flex-shrink-0 px-3 py-2 text-sm font-semibold text-gray-400 border-r border-gray-100 flex items-center justify-between gap-1">
+                            <span className="font-mono">{time}</span>
                             <button
                                 type="button"
-                                className="w-5 h-5 rounded bg-primary-100 text-primary-700 hover:bg-primary-200 text-xs font-bold"
+                                disabled={isSunday}
+                                className={`w-5 h-5 rounded text-xs font-bold ${isSunday ? "bg-gray-100 text-gray-300 cursor-not-allowed" : "bg-primary-50 text-primary-600 hover:bg-primary-100 opacity-60 hover:opacity-100"}`}
                                 onClick={(e) => {
                                     e.stopPropagation();
+                                    if (isSunday) return;
                                     onSlotClick(time);
                                 }}
                                 title="Add appointment at this time"
@@ -598,66 +938,16 @@ function DayView({
                                 +
                             </button>
                         </div>
-                        <div className="flex-1 px-3 py-2 flex flex-wrap gap-2">
-                            {slotAppts.map((appt) => (
-                                <div
-                                    key={appt.id}
-                                    className={`rounded-lg px-3 py-1.5 border text-sm font-medium flex items-center gap-2 ${STATUS_COLORS[appt.status] || STATUS_COLORS.scheduled} ${(appt.doctorId && DOCTOR_ACCENT[appt.doctorId]) || ""}`}
-                                    onClick={(e) => e.stopPropagation()}
-                                >
-                                    <span className="font-bold">{appt.patientName}</span>
-                                    <span className="text-xs opacity-70">{appt.type}</span>
-                                    {appt.doctorName && (
-                                        <span className="text-xs opacity-60 italic">{appt.doctorName}</span>
-                                    )}
-                                    {appt.duration !== 30 && (
-                                        <span className="text-xs opacity-50">{appt.duration}m</span>
-                                    )}
-                                    <div className="flex items-center gap-1 ml-2">
-                                        {appt.status === "scheduled" && (
-                                            <button
-                                                onClick={() => onStatusChange(appt.id, "confirmed")}
-                                                className="text-xs px-1.5 py-0.5 rounded bg-emerald-500 text-white hover:bg-emerald-600"
-                                                title="Confirm"
-                                            >
-                                                ✓
-                                            </button>
-                                        )}
-                                        {appt.status !== "cancelled" && appt.status !== "completed" && (
-                                            <button
-                                                onClick={() => onStatusChange(appt.id, "cancelled")}
-                                                className="text-xs px-1.5 py-0.5 rounded bg-red-500 text-white hover:bg-red-600"
-                                                title="Cancel"
-                                            >
-                                                ✕
-                                            </button>
-                                        )}
-                                        <button
-                                            onClick={() => onEdit(appt)}
-                                            className="text-xs px-1.5 py-0.5 rounded bg-gray-200 text-gray-700 hover:bg-gray-300"
-                                            title="Edit"
-                                        >
-                                            ✎
-                                        </button>
-                                        <button
-                                            onClick={() => onDelete(appt.id)}
-                                            className="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-700 hover:bg-red-200"
-                                            title="Delete permanently"
-                                        >
-                                            🗑
-                                        </button>
-                                        {appt.patientPhone && (
-                                            <button
-                                                onClick={() => sendWaReminder(appt)}
-                                                className="text-xs px-1.5 py-0.5 rounded bg-green-500 text-white hover:bg-green-600"
-                                                title="Send WhatsApp Reminder"
-                                            >
-                                                📱
-                                            </button>
-                                        )}
+                        <div className="flex-1 px-2 py-1.5 flex flex-wrap gap-2">
+                            {slotAppts.length === 0 ? (
+                                <span className="text-xs text-gray-300 self-center">{isSunday ? "clinic closed" : "click to book"}</span>
+                            ) : (
+                                slotAppts.map((appt) => (
+                                    <div key={appt.id} className="min-w-[180px] max-w-[260px]">
+                                        <AppointmentCard appt={appt} onClick={() => onApptClick(appt)} />
                                     </div>
-                                </div>
-                            ))}
+                                ))
+                            )}
                         </div>
                     </div>
                 );
@@ -672,96 +962,384 @@ function WeekView({
     weekDays,
     appointments,
     onSlotClick,
-    onEdit,
-    onStatusChange,
+    onApptClick,
+    onCreateAny,
+    anyFilterActive,
 }: {
     weekDays: Date[];
     appointments: Appointment[];
     onSlotClick: (date: string, time: string) => void;
-    onEdit: (appt: Appointment) => void;
-    onStatusChange: (id: string, status: string) => void;
+    onApptClick: (appt: Appointment) => void;
+    onCreateAny: () => void;
+    anyFilterActive: boolean;
 }) {
     const today = format(new Date(), "yyyy-MM-dd");
+    const HOUR_SLOTS = TIME_SLOTS.filter((_, i) => i % 2 === 0);
+
+    if (appointments.length === 0 && !anyFilterActive) {
+        return (
+            <EmptyState
+                title="No appointments this week"
+                body="Click any cell below to add a new appointment, or jump straight to creation."
+                onCreate={onCreateAny}
+            />
+        );
+    }
 
     return (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-x-auto">
-            <table className="w-full border-collapse">
-                <thead>
-                    <tr className="bg-gray-50">
-                        <th className="w-20 p-3 text-xs text-gray-400 font-medium border-b border-r border-gray-200">
-                            Time
-                        </th>
-                        {weekDays.map((day) => {
-                            const d = format(day, "yyyy-MM-dd");
-                            const isToday = d === today;
-                            return (
-                                <th
-                                    key={d}
-                                    className={`p-3 text-center border-b border-gray-200 ${isToday ? "bg-primary-50" : ""}`}
-                                >
-                                    <div className={`text-xs font-medium ${isToday ? "text-primary-600" : "text-gray-400"}`}>
-                                        {format(day, "EEE")}
-                                    </div>
-                                    <div className={`text-lg font-bold ${isToday ? "text-primary-700" : "text-gray-700"}`}>
-                                        {format(day, "d")}
-                                    </div>
-                                </th>
-                            );
-                        })}
-                    </tr>
-                </thead>
-                <tbody>
-                    {TIME_SLOTS.filter((_, i) => i % 2 === 0).map((time) => (
-                        <tr key={time} className="hover:bg-gray-50/30">
-                            <td className="px-3 py-2 text-xs font-semibold text-gray-400 border-r border-b border-gray-100 text-center whitespace-nowrap">
-                                {time}
-                            </td>
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+            {anyFilterActive && appointments.length === 0 && (
+                <div className="px-4 py-3 text-sm text-gray-500 bg-amber-50 border-b border-amber-100">
+                    No appointments match your filters this week.
+                </div>
+            )}
+            <div className="overflow-x-auto">
+                <table className="w-full border-collapse min-w-[760px]">
+                    <thead>
+                        <tr className="bg-gray-50">
+                            <th className="w-20 p-3 text-xs text-gray-400 font-medium border-b border-r border-gray-200 sticky left-0 bg-gray-50 z-10">
+                                Time
+                            </th>
                             {weekDays.map((day) => {
                                 const d = format(day, "yyyy-MM-dd");
                                 const isToday = d === today;
-                                const dayAppts = appointments.filter(
-                                    (a) => a.appointmentDate === d && (a.timeSlot === time || a.timeSlot === `${time.split(":")[0]}:30`)
-                                );
+                                const isSunday = day.getDay() === 0;
                                 return (
-                                    <td
+                                    <th
                                         key={d}
-                                        className={`border-b border-gray-100 px-1 py-1 align-top cursor-pointer min-w-[120px] ${isToday ? "bg-primary-50/30" : ""}`}
-                                        onClick={() => dayAppts.length === 0 && onSlotClick(d, time)}
+                                        className={`p-2 text-center border-b border-gray-200 ${isToday ? "bg-primary-50" : ""} ${isSunday ? "bg-gray-100/60" : ""}`}
                                     >
-                                        <div className="flex justify-end mb-1">
-                                            <button
-                                                type="button"
-                                                className="w-5 h-5 rounded bg-primary-100 text-primary-700 hover:bg-primary-200 text-xs font-bold"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    onSlotClick(d, time);
-                                                }}
-                                                title="Add appointment"
-                                            >
-                                                +
-                                            </button>
+                                        <div className={`text-[11px] font-semibold ${isToday ? "text-primary-600" : "text-gray-400"}`}>
+                                            {format(day, "EEE")}
                                         </div>
-                                        {dayAppts.map((appt) => (
-                                            <div
-                                                key={appt.id}
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    onEdit(appt);
-                                                }}
-                                                className={`rounded px-1.5 py-1 text-xs font-medium mb-1 border cursor-pointer truncate ${STATUS_COLORS[appt.status] || STATUS_COLORS.scheduled}`}
-                                                title={`${appt.patientName} - ${appt.type} (${appt.timeSlot})`}
-                                            >
-                                                <div className="font-bold truncate">{appt.patientName}</div>
-                                                <div className="opacity-60">{appt.timeSlot}</div>
-                                            </div>
-                                        ))}
-                                    </td>
+                                        <div className={`text-base font-bold ${isToday ? "text-primary-700" : "text-gray-700"}`}>
+                                            {format(day, "d")}
+                                        </div>
+                                        {isSunday && (
+                                            <div className="text-[9px] uppercase tracking-wide text-gray-400 font-semibold">closed</div>
+                                        )}
+                                    </th>
                                 );
                             })}
                         </tr>
-                    ))}
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody>
+                        {HOUR_SLOTS.map((time) => (
+                            <tr key={time} className="hover:bg-gray-50/30">
+                                <td className="px-2 py-1.5 text-[11px] font-mono font-semibold text-gray-400 border-r border-b border-gray-100 text-center whitespace-nowrap sticky left-0 bg-white z-10">
+                                    {time}
+                                </td>
+                                {weekDays.map((day) => {
+                                    const d = format(day, "yyyy-MM-dd");
+                                    const isToday = d === today;
+                                    const isSunday = day.getDay() === 0;
+                                    const dayAppts = appointments.filter(
+                                        (a) =>
+                                            a.appointmentDate === d &&
+                                            (a.timeSlot === time || a.timeSlot === `${time.split(":")[0]}:30`)
+                                    );
+                                    return (
+                                        <td
+                                            key={d}
+                                            className={`border-b border-gray-100 px-1 py-1 align-top min-w-[110px] ${isToday ? "bg-primary-50/30" : ""} ${isSunday ? "bg-gray-100/70 cursor-not-allowed" : "cursor-pointer"}`}
+                                            onClick={() => !isSunday && dayAppts.length === 0 && onSlotClick(d, time)}
+                                        >
+                                            {dayAppts.map((appt) => (
+                                                <div key={appt.id} className="mb-1 last:mb-0">
+                                                    <AppointmentCard appt={appt} onClick={() => onApptClick(appt)} compact />
+                                                </div>
+                                            ))}
+                                        </td>
+                                    );
+                                })}
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+}
+
+// ─── Month View ─────────────────────────────────────────────────────
+
+function MonthView({
+    currentDate,
+    monthGridStart,
+    monthGridEnd,
+    appointments,
+    onDayClick,
+    onApptClick,
+    onCreateAny,
+    anyFilterActive,
+}: {
+    currentDate: Date;
+    monthGridStart: string;
+    monthGridEnd: string;
+    appointments: Appointment[];
+    onDayClick: (d: string) => void;
+    onApptClick: (appt: Appointment) => void;
+    onCreateAny: () => void;
+    anyFilterActive: boolean;
+}) {
+    const today = format(new Date(), "yyyy-MM-dd");
+
+    // Build the grid of date cells (Mon-Sun)
+    const days: Date[] = [];
+    {
+        const [sy, sm, sd] = monthGridStart.split("-").map(Number);
+        const [ey, em, ed] = monthGridEnd.split("-").map(Number);
+        let cur = new Date(sy, sm - 1, sd);
+        const end = new Date(ey, em - 1, ed);
+        while (cur <= end) {
+            days.push(new Date(cur));
+            cur = addDays(cur, 1);
+        }
+    }
+
+    if (appointments.length === 0 && !anyFilterActive) {
+        return (
+            <EmptyState
+                title={`No appointments in ${format(currentDate, "MMMM yyyy")}`}
+                body="Pick a day in the month grid to start scheduling."
+                onCreate={onCreateAny}
+            />
+        );
+    }
+
+    return (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+            {anyFilterActive && appointments.length === 0 && (
+                <div className="px-4 py-3 text-sm text-gray-500 bg-amber-50 border-b border-amber-100">
+                    No appointments match your filters this month.
+                </div>
+            )}
+            {/* Weekday header */}
+            <div className="grid grid-cols-7 bg-gray-50 border-b border-gray-200">
+                {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((label, i) => (
+                    <div
+                        key={label}
+                        className={`p-2.5 text-center text-[11px] font-bold uppercase tracking-wide ${i === 6 ? "text-gray-400" : "text-gray-500"}`}
+                    >
+                        {label}
+                    </div>
+                ))}
+            </div>
+
+            {/* Day cells */}
+            <div className="grid grid-cols-7">
+                {days.map((day) => {
+                    const d = format(day, "yyyy-MM-dd");
+                    const isToday = d === today;
+                    const isSunday = day.getDay() === 0;
+                    const inMonth = isSameMonth(day, currentDate);
+                    const dayAppts = appointments.filter((a) => a.appointmentDate === d);
+                    const visibleAppts = dayAppts.slice(0, 3);
+                    const moreCount = dayAppts.length - visibleAppts.length;
+
+                    return (
+                        <div
+                            key={d}
+                            onClick={() => onDayClick(d)}
+                            className={`min-h-[110px] border-b border-r border-gray-100 last:border-r-0 p-1.5 cursor-pointer transition flex flex-col gap-1 ${inMonth ? "bg-white" : "bg-gray-50/40"} ${isToday ? "ring-2 ring-inset ring-primary-300" : ""} ${isSunday ? "bg-gray-50" : ""} hover:bg-primary-50/30`}
+                            title={`${dayAppts.length} appointment${dayAppts.length === 1 ? "" : "s"} — click to view day`}
+                        >
+                            <div className="flex items-center justify-between">
+                                <span
+                                    className={`text-sm font-bold ${isToday
+                                        ? "inline-flex items-center justify-center w-6 h-6 rounded-full bg-primary-600 text-white"
+                                        : inMonth
+                                            ? "text-gray-700"
+                                            : "text-gray-300"
+                                        }`}
+                                >
+                                    {format(day, "d")}
+                                </span>
+                                {isSunday ? (
+                                    <span className="text-[9px] uppercase tracking-wide text-gray-400 font-semibold">closed</span>
+                                ) : dayAppts.length > 0 ? (
+                                    <span className="text-[10px] font-semibold text-gray-400">
+                                        {dayAppts.length}
+                                    </span>
+                                ) : null}
+                            </div>
+                            <div className="flex flex-col gap-0.5 overflow-hidden">
+                                {visibleAppts.map((appt) => {
+                                    const sm = statusMeta(appt.status);
+                                    return (
+                                        <button
+                                            key={appt.id}
+                                            type="button"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                onApptClick(appt);
+                                            }}
+                                            className={`text-left text-[11px] truncate rounded px-1.5 py-0.5 border ${sm.chip} ${doctorAccent(appt.doctorId)} hover:brightness-95`}
+                                            title={`${appt.timeSlot} ${appt.patientName} (${sm.label})`}
+                                        >
+                                            <span className="font-mono opacity-70 mr-1">{appt.timeSlot}</span>
+                                            <span className="font-semibold">{appt.patientName || "—"}</span>
+                                        </button>
+                                    );
+                                })}
+                                {moreCount > 0 && (
+                                    <span className="text-[10px] text-primary-600 font-semibold pl-1">
+                                        +{moreCount} more
+                                    </span>
+                                )}
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+}
+
+// ─── Details Panel (modal) ──────────────────────────────────────────
+
+function DetailsPanel({
+    appt,
+    onClose,
+    onEdit,
+    onConfirm,
+    onComplete,
+    onCancel,
+    onDelete,
+    onWhatsApp,
+    pending,
+}: {
+    appt: Appointment;
+    onClose: () => void;
+    onEdit: (appt: Appointment) => void;
+    onConfirm: (appt: Appointment) => void;
+    onComplete: (appt: Appointment) => void;
+    onCancel: (appt: Appointment) => void;
+    onDelete: (appt: Appointment) => void;
+    onWhatsApp: (appt: Appointment) => void;
+    pending: boolean;
+}) {
+    const sm = statusMeta(appt.status);
+    const tm = typeMeta(appt.type);
+    const sk = statusKey(appt.status);
+    const isClosed = sk === "cancelled" || sk === "completed";
+
+    return (
+        <div
+            className="fixed inset-0 bg-black/40 flex items-center justify-center z-40 p-4"
+            onClick={onClose}
+        >
+            <div
+                className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto"
+                onClick={(e) => e.stopPropagation()}
+            >
+                {/* Header */}
+                <div className="flex items-start justify-between gap-3 mb-3">
+                    <div>
+                        <h3 className="text-xl font-extrabold text-gray-900 leading-tight">
+                            {appt.patientName || "—"}
+                        </h3>
+                        <p className="text-xs text-gray-500 mt-0.5 font-mono">
+                            {appt.appointmentDate} • {appt.timeSlot}
+                            {appt.duration ? ` • ${appt.duration}m` : ""}
+                        </p>
+                    </div>
+                    <button
+                        onClick={onClose}
+                        className="text-gray-400 hover:text-gray-600 text-2xl leading-none"
+                        title="Close"
+                    >
+                        ×
+                    </button>
+                </div>
+
+                {/* Status + type */}
+                <div className="flex flex-wrap gap-2 mb-4">
+                    <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-semibold ${sm.badge}`}>
+                        <span className={`w-2 h-2 rounded-full ${sm.dot}`} />
+                        {sm.label}
+                    </span>
+                    <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-semibold ${tm.tint}`}>
+                        {tm.label}
+                    </span>
+                </div>
+
+                {/* Detail rows */}
+                <div className="space-y-2 text-sm bg-gray-50 rounded-xl p-3 mb-4">
+                    <Row label="Doctor" value={appt.doctorName || "—"} />
+                    <Row label="Phone" value={appt.patientPhone || "—"} mono />
+                    {appt.notes && <Row label="Notes" value={appt.notes} />}
+                </div>
+
+                {/* Quick status actions */}
+                {!isClosed && (
+                    <div className="flex flex-wrap gap-2 mb-3">
+                        {sk === "scheduled" && (
+                            <button
+                                onClick={() => onConfirm(appt)}
+                                disabled={pending}
+                                className="flex-1 px-3 py-2 bg-emerald-600 text-white text-sm font-semibold rounded-lg hover:bg-emerald-700 transition disabled:opacity-50"
+                            >
+                                ✓ Confirm
+                            </button>
+                        )}
+                        {(sk === "scheduled" || sk === "confirmed") && (
+                            <button
+                                onClick={() => onComplete(appt)}
+                                disabled={pending}
+                                className="flex-1 px-3 py-2 bg-gray-700 text-white text-sm font-semibold rounded-lg hover:bg-gray-800 transition disabled:opacity-50"
+                            >
+                                ✓ Complete
+                            </button>
+                        )}
+                        <button
+                            onClick={() => onCancel(appt)}
+                            disabled={pending}
+                            className="flex-1 px-3 py-2 bg-rose-50 text-rose-700 border border-rose-200 text-sm font-semibold rounded-lg hover:bg-rose-100 transition disabled:opacity-50"
+                        >
+                            Cancel
+                        </button>
+                    </div>
+                )}
+
+                {/* Tools */}
+                <div className="flex flex-wrap gap-2">
+                    <button
+                        onClick={() => onEdit(appt)}
+                        className="flex-1 px-3 py-2 bg-primary-600 text-white text-sm font-bold rounded-lg hover:bg-primary-700 transition"
+                    >
+                        ✎ Edit
+                    </button>
+                    {appt.patientPhone && (
+                        <button
+                            onClick={() => onWhatsApp(appt)}
+                            className="px-3 py-2 bg-green-500 text-white text-sm font-semibold rounded-lg hover:bg-green-600 transition"
+                            title="Send WhatsApp reminder"
+                        >
+                            📱 WhatsApp
+                        </button>
+                    )}
+                    <button
+                        onClick={() => onDelete(appt)}
+                        disabled={pending}
+                        className="px-3 py-2 bg-white border border-rose-200 text-rose-600 text-sm font-semibold rounded-lg hover:bg-rose-50 transition disabled:opacity-50"
+                        title="Delete permanently"
+                    >
+                        🗑 Delete
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+    return (
+        <div className="flex items-baseline gap-3">
+            <span className="w-16 shrink-0 text-xs font-semibold uppercase tracking-wide text-gray-400">
+                {label}
+            </span>
+            <span className={`text-gray-700 break-words ${mono ? "font-mono" : ""}`}>{value}</span>
         </div>
     );
 }
