@@ -11,6 +11,17 @@ import {
     endOfMonth,
     isSameMonth,
 } from "date-fns";
+import {
+    DndContext,
+    DragOverlay,
+    useDraggable,
+    useDroppable,
+    PointerSensor,
+    useSensor,
+    useSensors,
+    type DragEndEvent,
+    type DragStartEvent,
+} from "@dnd-kit/core";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -104,6 +115,12 @@ function doctorAccent(id?: string) {
 const VIEWS = ["day", "week", "month"] as const;
 type ViewMode = (typeof VIEWS)[number];
 
+// Statuses eligible for drag-to-reschedule (active, non-terminal)
+const DRAGGABLE_STATUSES = new Set(["scheduled", "confirmed"]);
+function isDraggable(appt: Appointment): boolean {
+    return DRAGGABLE_STATUSES.has(statusKey(appt.status));
+}
+
 // ─── Main Component ─────────────────────────────────────────────────
 
 export default function Appointments() {
@@ -113,6 +130,18 @@ export default function Appointments() {
     const [showDialog, setShowDialog] = useState(false);
     const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
     const [selectedAppt, setSelectedAppt] = useState<Appointment | null>(null);
+
+    // DnD state
+    const [draggingAppt, setDraggingAppt] = useState<Appointment | null>(null);
+    const [dndBanner, setDndBanner] = useState<{
+        kind: "success" | "error";
+        message: string;
+        detail?: string;
+    } | null>(null);
+
+    const sensors = useSensors(
+        useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
+    );
 
     // Filters (client-side; do not mutate server data)
     const [doctorFilter, setDoctorFilter] = useState<string>("");
@@ -232,6 +261,81 @@ export default function Appointments() {
             alert(e?.message || "Failed to delete appointment.");
         },
     });
+
+    // DnD reschedule mutation — calls the same PUT /appointments/:id
+    const rescheduleMutation = useMutation({
+        mutationFn: ({ appt, newDate, newTime }: { appt: Appointment; newDate: string; newTime: string }) =>
+            api.appointments.update(appt.id, {
+                patientId: appt.patientId,
+                doctorId: appt.doctorId,
+                appointmentDate: newDate,
+                timeSlot: newTime,
+                duration: appt.duration,
+                type: appt.type,
+                status: appt.status,
+                notes: appt.notes,
+            }),
+        onSuccess: (_data, vars) => {
+            queryClient.invalidateQueries({ queryKey: ["appointments"] });
+            setDndBanner({
+                kind: "success",
+                message: `Appointment moved to ${vars.newTime} on ${vars.newDate}.`,
+            });
+            setTimeout(() => setDndBanner(null), 4000);
+        },
+        onError: (e: any, _vars) => {
+            // Refetch so card returns to original slot
+            queryClient.invalidateQueries({ queryKey: ["appointments"] });
+            const body = e?.body;
+            const msg: string = e?.message || "Failed to move appointment.";
+            let message = "Cannot move appointment.";
+            let detail: string | undefined;
+            if (e?.status === 409 && body?.type === "doctor_conflict") {
+                message = "Cannot move: doctor already has an overlapping appointment.";
+                if (body?.conflict) {
+                    const c = body.conflict;
+                    detail = `Conflicts with ${c.patientName || "another patient"} at ${c.timeSlot}${c.duration ? ` (${c.duration}m)` : ""}.`;
+                }
+            } else if (e?.status === 409 && body?.type === "patient_conflict") {
+                message = "Cannot move: patient already has another appointment at this time.";
+                if (body?.conflict) {
+                    const c = body.conflict;
+                    detail = `Overlaps with appointment at ${c.timeSlot}${c.duration ? ` (${c.duration}m)` : ""}.`;
+                }
+            } else if (e?.status === 400 && /working hours/i.test(msg)) {
+                message = "Cannot move appointment outside clinic working hours (08:00–17:30, Mon–Sat).";
+            } else {
+                message = msg;
+            }
+            setDndBanner({ kind: "error", message, detail });
+            setTimeout(() => setDndBanner(null), 6000);
+        },
+    });
+
+    // ─── DnD handlers ────────────────────────────────────────────────
+
+    function handleDragStart(event: DragStartEvent) {
+        const appt = event.active.data.current as Appointment | undefined;
+        if (appt) setDraggingAppt(appt);
+    }
+
+    function handleDragEnd(event: DragEndEvent) {
+        setDraggingAppt(null);
+        const appt = event.active.data.current as Appointment | undefined;
+        if (!appt) return;
+        const target = event.over?.id as string | undefined;
+        if (!target) return;
+        // target id format: "slot::{date}::{time}"
+        const parts = String(target).split("::");
+        const newDate = parts[1];
+        const newTime = parts[2];
+        if (!newDate || !newTime) return;
+        // Skip if same slot
+        if (newDate === appt.appointmentDate && newTime === appt.timeSlot) return;
+        // Sunday guard (belt-and-suspenders — droppable already disabled for Sunday)
+        if (isSundayDate(newDate)) return;
+        rescheduleMutation.mutate({ appt, newDate, newTime });
+    }
 
     // ─── Helpers ─────────────────────────────────────────────────────
 
@@ -376,399 +480,439 @@ export default function Appointments() {
     // ─── Render ─────────────────────────────────────────────────────
 
     return (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
-            {/* ─── Header ─── */}
-            <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
-                <div>
-                    <h1 className="text-3xl font-extrabold text-gray-900">📅 Appointments</h1>
-                    <p className="text-sm text-gray-500 mt-1">
-                        Day, week & month scheduling — color-coded by status, drag-free for now.
-                    </p>
-                </div>
-                <button
-                    onClick={() => openCreate()}
-                    className="px-5 py-2.5 bg-primary-600 text-white font-bold rounded-xl hover:bg-primary-700 transition shadow-sm"
-                >
-                    + New Appointment
-                </button>
-            </div>
-
-            {/* ─── Toolbar ─── */}
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 mb-4 flex flex-wrap items-center gap-3">
-                {/* View switcher */}
-                <div className="flex bg-gray-50 rounded-xl border border-gray-200 overflow-hidden">
-                    {VIEWS.map((v) => (
-                        <button
-                            key={v}
-                            onClick={() => setView(v)}
-                            className={`px-4 py-2 text-sm font-semibold capitalize transition ${view === v
-                                ? "bg-primary-600 text-white shadow-inner"
-                                : "text-gray-600 hover:bg-white"
-                                }`}
-                        >
-                            {v}
-                        </button>
-                    ))}
-                </div>
-
-                {/* Navigation */}
-                <div className="flex items-center gap-1.5">
-                    <button
-                        onClick={() => navigateDate(-1)}
-                        className="w-9 h-9 flex items-center justify-center rounded-lg bg-white border border-gray-200 hover:bg-gray-50 transition text-lg font-bold text-gray-600"
-                        title="Previous"
-                    >
-                        ‹
-                    </button>
-                    <button
-                        onClick={() => setCurrentDate(new Date())}
-                        className="px-3 py-1.5 text-sm font-semibold bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition text-primary-600"
-                    >
-                        Today
-                    </button>
-                    <button
-                        onClick={() => navigateDate(1)}
-                        className="w-9 h-9 flex items-center justify-center rounded-lg bg-white border border-gray-200 hover:bg-gray-50 transition text-lg font-bold text-gray-600"
-                        title="Next"
-                    >
-                        ›
-                    </button>
-                </div>
-
-                {/* Date picker */}
-                <input
-                    type="date"
-                    value={dateStr}
-                    onChange={(e) => {
-                        if (e.target.value) {
-                            const [y, m, d] = e.target.value.split("-").map(Number);
-                            setCurrentDate(new Date(y, m - 1, d));
-                        }
-                    }}
-                    className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm font-semibold focus:ring-2 focus:ring-primary-300 outline-none bg-white"
-                />
-
-                <h2 className="text-lg font-bold text-gray-700 ml-2">
-                    {view === "day"
-                        ? format(currentDate, "EEEE, MMMM d, yyyy")
-                        : view === "week"
-                            ? `${format(weekDays[0], "MMM d")} – ${format(weekDays[6], "MMM d, yyyy")}`
-                            : format(currentDate, "MMMM yyyy")}
-                </h2>
-
-                {/* Filters (right side) */}
-                <div className="ml-auto flex flex-wrap items-center gap-2">
-                    <select
-                        value={doctorFilter}
-                        onChange={(e) => setDoctorFilter(e.target.value)}
-                        className="border border-gray-200 rounded-xl px-3 py-1.5 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary-300 bg-white"
-                        title="Filter by doctor"
-                    >
-                        <option value="">All doctors</option>
-                        {doctorList.map((d) => (
-                            <option key={d.id} value={d.id}>{d.name}</option>
-                        ))}
-                    </select>
-
-                    <select
-                        value={statusFilter}
-                        onChange={(e) => setStatusFilter(e.target.value)}
-                        className="border border-gray-200 rounded-xl px-3 py-1.5 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary-300 bg-white"
-                        title="Filter by status"
-                    >
-                        <option value="">All statuses</option>
-                        {(Object.keys(STATUS_META) as Array<keyof typeof STATUS_META>).map((s) => (
-                            <option key={s} value={s}>{STATUS_META[s].label}</option>
-                        ))}
-                    </select>
-
-                    <select
-                        value={typeFilter}
-                        onChange={(e) => setTypeFilter(e.target.value)}
-                        className="border border-gray-200 rounded-xl px-3 py-1.5 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary-300 bg-white"
-                        title="Filter by type"
-                    >
-                        <option value="">All types</option>
-                        {typeOptions.map((t) => (
-                            <option key={t} value={t}>{typeMeta(t).label}</option>
-                        ))}
-                    </select>
-
-                    {anyFilterActive && (
-                        <button
-                            onClick={clearFilters}
-                            className="px-2.5 py-1.5 text-xs font-semibold text-gray-500 hover:text-gray-700 underline-offset-2 hover:underline"
-                        >
-                            Clear filters
-                        </button>
-                    )}
-                </div>
-            </div>
-
-            {/* ─── Legend ─── */}
-            <Legend />
-
-            {/* ─── View ─── */}
-            {isLoading ? (
-                <div className="flex justify-center p-12">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600" />
-                </div>
-            ) : view === "day" ? (
-                <DayView
-                    date={dateStr}
-                    appointments={filteredAppointments}
-                    onSlotClick={(time: string) => openCreate(dateStr, time)}
-                    onApptClick={setSelectedAppt}
-                    onCreateAny={() => openCreate()}
-                    anyFilterActive={anyFilterActive}
-                />
-            ) : view === "week" ? (
-                <WeekView
-                    weekDays={weekDays}
-                    appointments={filteredAppointments}
-                    onSlotClick={(date: string, time: string) => openCreate(date, time)}
-                    onApptClick={setSelectedAppt}
-                    onCreateAny={() => openCreate()}
-                    anyFilterActive={anyFilterActive}
-                />
-            ) : (
-                <MonthView
-                    currentDate={currentDate}
-                    monthGridStart={monthGridStart}
-                    monthGridEnd={monthGridEnd}
-                    appointments={filteredAppointments}
-                    onDayClick={(d: string) => {
-                        const [y, m, dd] = d.split("-").map(Number);
-                        setCurrentDate(new Date(y, m - 1, dd));
-                        setView("day");
-                    }}
-                    onApptClick={setSelectedAppt}
-                    onCreateAny={() => openCreate()}
-                    anyFilterActive={anyFilterActive}
-                />
-            )}
-
-            {/* ─── Details panel (modal) ─── */}
-            {selectedAppt && (
-                <DetailsPanel
-                    appt={selectedAppt}
-                    onClose={() => setSelectedAppt(null)}
-                    onEdit={openEdit}
-                    onConfirm={handleConfirmAppt}
-                    onComplete={handleCompleteAppt}
-                    onCancel={handleCancelAppt}
-                    onDelete={handleDeleteAppt}
-                    onWhatsApp={sendWaReminder}
-                    pending={statusMutation.isPending || deleteMutation.isPending}
-                />
-            )}
-
-            {/* ─── Create/Edit Dialog ─── */}
-            {showDialog && (
-                <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={closeDialog}>
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-                        <h3 className="text-xl font-bold text-gray-900 mb-1">
-                            {editingAppointment ? "Edit Appointment" : "New Appointment"}
-                        </h3>
-                        <p className="text-xs text-gray-500 mb-4">
-                            Tip: click empty slots in day/week views to create at a specific time.
+        <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+                {/* ─── Header ─── */}
+                <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+                    <div>
+                        <h1 className="text-3xl font-extrabold text-gray-900">📅 Appointments</h1>
+                        <p className="text-sm text-gray-500 mt-1">
+                            Day, week & month scheduling — drag cards to reschedule, click to open details.
                         </p>
+                    </div>
+                    <button
+                        onClick={() => openCreate()}
+                        className="px-5 py-2.5 bg-primary-600 text-white font-bold rounded-xl hover:bg-primary-700 transition shadow-sm"
+                    >
+                        + New Appointment
+                    </button>
+                </div>
 
-                        {/* Error banner */}
-                        {formError && (
-                            <div
-                                role="alert"
-                                className={`mb-4 rounded-xl border px-4 py-3 text-sm ${formError.kind === "doctor_conflict" || formError.kind === "patient_conflict"
-                                    ? "bg-rose-50 border-rose-200 text-rose-800"
-                                    : formError.kind === "working-hours"
-                                        ? "bg-amber-50 border-amber-200 text-amber-800"
-                                        : "bg-gray-50 border-gray-200 text-gray-700"
+                {/* ─── DnD Banner ─── */}
+                {dndBanner && (
+                    <div
+                        role="alert"
+                        className={`mb-4 flex items-start justify-between gap-4 rounded-xl border px-4 py-3 text-sm ${dndBanner.kind === "success"
+                            ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                            : "bg-rose-50 border-rose-200 text-rose-800"
+                            }`}
+                    >
+                        <div>
+                            <p className="font-semibold">
+                                {dndBanner.kind === "success" ? "✓ " : "⚠ "}{dndBanner.message}
+                            </p>
+                            {dndBanner.detail && (
+                                <p className="text-xs mt-0.5 opacity-90">{dndBanner.detail}</p>
+                            )}
+                        </div>
+                        <button
+                            onClick={() => setDndBanner(null)}
+                            className="shrink-0 text-lg leading-none opacity-60 hover:opacity-100"
+                        >
+                            ×
+                        </button>
+                    </div>
+                )}
+
+                {/* ─── Toolbar ─── */}
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 mb-4 flex flex-wrap items-center gap-3">
+                    {/* View switcher */}
+                    <div className="flex bg-gray-50 rounded-xl border border-gray-200 overflow-hidden">
+                        {VIEWS.map((v) => (
+                            <button
+                                key={v}
+                                onClick={() => setView(v)}
+                                className={`px-4 py-2 text-sm font-semibold capitalize transition ${view === v
+                                    ? "bg-primary-600 text-white shadow-inner"
+                                    : "text-gray-600 hover:bg-white"
                                     }`}
                             >
-                                <p className="font-semibold mb-0.5">
-                                    {formError.kind === "doctor_conflict" && "⚠ Time conflict"}
-                                    {formError.kind === "patient_conflict" && "⚠ Patient already has appointment"}
-                                    {formError.kind === "working-hours" && "⚠ Outside working hours"}
-                                    {formError.kind === "generic" && "Could not save appointment"}
-                                </p>
-                                <p>{formError.message}</p>
-                                {(formError.kind === "doctor_conflict" || formError.kind === "patient_conflict") && formError.conflict && (
-                                    <p className="mt-1 text-xs opacity-90">
-                                        {formError.kind === "patient_conflict"
-                                            ? "This patient already has another appointment at this time: "
-                                            : "Conflicts with "}
-                                        <span className="font-semibold">
-                                            {formError.conflict.patientName || "another appointment"}
-                                        </span>{" "}
-                                        — {formError.conflict.doctorName || "same doctor"} on{" "}
-                                        {formError.conflict.appointmentDate} at {formError.conflict.timeSlot}
-                                        {formError.conflict.duration ? ` (${formError.conflict.duration}m)` : ""}.
-                                        Pick a different time, doctor, or duration.
-                                    </p>
-                                )}
-                            </div>
+                                {v}
+                            </button>
+                        ))}
+                    </div>
+
+                    {/* Navigation */}
+                    <div className="flex items-center gap-1.5">
+                        <button
+                            onClick={() => navigateDate(-1)}
+                            className="w-9 h-9 flex items-center justify-center rounded-lg bg-white border border-gray-200 hover:bg-gray-50 transition text-lg font-bold text-gray-600"
+                            title="Previous"
+                        >
+                            ‹
+                        </button>
+                        <button
+                            onClick={() => setCurrentDate(new Date())}
+                            className="px-3 py-1.5 text-sm font-semibold bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition text-primary-600"
+                        >
+                            Today
+                        </button>
+                        <button
+                            onClick={() => navigateDate(1)}
+                            className="w-9 h-9 flex items-center justify-center rounded-lg bg-white border border-gray-200 hover:bg-gray-50 transition text-lg font-bold text-gray-600"
+                            title="Next"
+                        >
+                            ›
+                        </button>
+                    </div>
+
+                    {/* Date picker */}
+                    <input
+                        type="date"
+                        value={dateStr}
+                        onChange={(e) => {
+                            if (e.target.value) {
+                                const [y, m, d] = e.target.value.split("-").map(Number);
+                                setCurrentDate(new Date(y, m - 1, d));
+                            }
+                        }}
+                        className="px-3 py-1.5 border border-gray-200 rounded-lg text-sm font-semibold focus:ring-2 focus:ring-primary-300 outline-none bg-white"
+                    />
+
+                    <h2 className="text-lg font-bold text-gray-700 ml-2">
+                        {view === "day"
+                            ? format(currentDate, "EEEE, MMMM d, yyyy")
+                            : view === "week"
+                                ? `${format(weekDays[0], "MMM d")} – ${format(weekDays[6], "MMM d, yyyy")}`
+                                : format(currentDate, "MMMM yyyy")}
+                    </h2>
+
+                    {/* Filters (right side) */}
+                    <div className="ml-auto flex flex-wrap items-center gap-2">
+                        <select
+                            value={doctorFilter}
+                            onChange={(e) => setDoctorFilter(e.target.value)}
+                            className="border border-gray-200 rounded-xl px-3 py-1.5 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary-300 bg-white"
+                            title="Filter by doctor"
+                        >
+                            <option value="">All doctors</option>
+                            {doctorList.map((d) => (
+                                <option key={d.id} value={d.id}>{d.name}</option>
+                            ))}
+                        </select>
+
+                        <select
+                            value={statusFilter}
+                            onChange={(e) => setStatusFilter(e.target.value)}
+                            className="border border-gray-200 rounded-xl px-3 py-1.5 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary-300 bg-white"
+                            title="Filter by status"
+                        >
+                            <option value="">All statuses</option>
+                            {(Object.keys(STATUS_META) as Array<keyof typeof STATUS_META>).map((s) => (
+                                <option key={s} value={s}>{STATUS_META[s].label}</option>
+                            ))}
+                        </select>
+
+                        <select
+                            value={typeFilter}
+                            onChange={(e) => setTypeFilter(e.target.value)}
+                            className="border border-gray-200 rounded-xl px-3 py-1.5 text-sm font-semibold outline-none focus:ring-2 focus:ring-primary-300 bg-white"
+                            title="Filter by type"
+                        >
+                            <option value="">All types</option>
+                            {typeOptions.map((t) => (
+                                <option key={t} value={t}>{typeMeta(t).label}</option>
+                            ))}
+                        </select>
+
+                        {anyFilterActive && (
+                            <button
+                                onClick={clearFilters}
+                                className="px-2.5 py-1.5 text-xs font-semibold text-gray-500 hover:text-gray-700 underline-offset-2 hover:underline"
+                            >
+                                Clear filters
+                            </button>
                         )}
-
-                        <form onSubmit={handleSubmit} className="space-y-4">
-                            {/* Patient picker */}
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-1">Patient</label>
-                                {selectedPatient ? (
-                                    <div className="flex items-center gap-2 px-3 py-2 bg-primary-50 border border-primary-200 rounded-lg">
-                                        <span className="font-semibold text-primary-700">
-                                            {selectedPatient.firstName} {selectedPatient.lastName}
-                                        </span>
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                setSelectedPatient(null);
-                                                setSearchQuery("");
-                                            }}
-                                            className="ml-auto text-primary-400 hover:text-primary-600"
-                                        >
-                                            ✕
-                                        </button>
-                                    </div>
-                                ) : (
-                                    <div className="relative">
-                                        <input
-                                            type="text"
-                                            value={searchQuery}
-                                            onChange={(e) => setSearchQuery(e.target.value)}
-                                            placeholder="Search existing patient by name or phone..."
-                                            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 outline-none text-sm"
-                                            autoFocus
-                                        />
-                                        {searchResults.length > 0 && (
-                                            <div className="absolute top-full left-0 right-0 mt-1 bg-white border rounded-lg shadow-lg max-h-40 overflow-y-auto z-10">
-                                                {searchResults.map((p: any) => {
-                                                    const cleanFatherName = p.fatherName && p.fatherName !== "." && p.fatherName !== "—" ? `${p.fatherName} ` : "";
-                                                    const cleanLastName = p.lastName && p.lastName !== "." && p.lastName !== "—" ? p.lastName : "";
-                                                    return (
-                                                        <button
-                                                            key={p.id}
-                                                            type="button"
-                                                            onClick={() => {
-                                                                setSelectedPatient(p);
-                                                                setSearchQuery("");
-                                                            }}
-                                                            className="w-full text-left px-3 py-2 hover:bg-primary-50 transition text-sm flex items-center justify-between"
-                                                        >
-                                                            <span className="font-semibold">
-                                                                {p.firstName} {cleanFatherName}{cleanLastName}
-                                                            </span>
-                                                            <div className="text-right">
-                                                                {p.phone && p.phone !== "0" && <span className="text-gray-500 font-mono text-xs">{p.phone}</span>}
-                                                                {!p.phone || p.phone === "0" ? <span className="text-gray-300 italic text-xs">No phone</span> : null}
-                                                            </div>
-                                                        </button>
-                                                    );
-                                                })}
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-1">Date</label>
-                                    <input
-                                        type="date"
-                                        value={formDate}
-                                        onChange={(e) => setFormDate(e.target.value)}
-                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 outline-none"
-                                        required
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-1">Time</label>
-                                    <select
-                                        value={formTime}
-                                        onChange={(e) => setFormTime(e.target.value)}
-                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 outline-none"
-                                    >
-                                        {TIME_SLOTS.map((t) => (
-                                            <option key={t} value={t}>{t}</option>
-                                        ))}
-                                    </select>
-                                </div>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-1">Duration (min)</label>
-                                    <select
-                                        value={formDuration}
-                                        onChange={(e) => setFormDuration(Number(e.target.value))}
-                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 outline-none"
-                                    >
-                                        {[15, 30, 45, 60, 90, 120].map((d) => (
-                                            <option key={d} value={d}>{d} min</option>
-                                        ))}
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-1">Type</label>
-                                    <select
-                                        value={formType}
-                                        onChange={(e) => setFormType(e.target.value)}
-                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 outline-none"
-                                    >
-                                        <option value="consultation">Consultation</option>
-                                        <option value="follow-up">Follow-up</option>
-                                        <option value="procedure">Procedure</option>
-                                        <option value="emergency">Emergency</option>
-                                    </select>
-                                </div>
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-1">Doctor</label>
-                                <select
-                                    value={formDoctorId}
-                                    onChange={(e) => setFormDoctorId(e.target.value)}
-                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 outline-none"
-                                    required
-                                >
-                                    {doctorList.map((d) => (
-                                        <option key={d.id} value={d.id}>{d.name}</option>
-                                    ))}
-                                </select>
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-1">Notes</label>
-                                <textarea
-                                    value={formNotes}
-                                    onChange={(e) => setFormNotes(e.target.value)}
-                                    rows={2}
-                                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 outline-none resize-none"
-                                    placeholder="Optional notes..."
-                                />
-                            </div>
-
-                            <div className="flex gap-3 pt-2">
-                                <button
-                                    type="button"
-                                    onClick={closeDialog}
-                                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 transition"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    type="submit"
-                                    disabled={!selectedPatient || createMutation.isPending || updateMutation.isPending}
-                                    className="flex-1 px-4 py-2 bg-primary-600 text-white font-bold rounded-lg hover:bg-primary-700 transition disabled:opacity-50"
-                                >
-                                    {editingAppointment ? "Update" : "Book"}
-                                </button>
-                            </div>
-                        </form>
                     </div>
                 </div>
-            )}
-        </div>
+
+                {/* ─── Legend ─── */}
+                <Legend />
+
+                {/* ─── View ─── */}
+                {isLoading ? (
+                    <div className="flex justify-center p-12">
+                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600" />
+                    </div>
+                ) : view === "day" ? (
+                    <DayView
+                        date={dateStr}
+                        appointments={filteredAppointments}
+                        onSlotClick={(time: string) => openCreate(dateStr, time)}
+                        onApptClick={setSelectedAppt}
+                        onCreateAny={() => openCreate()}
+                        anyFilterActive={anyFilterActive}
+                    />
+                ) : view === "week" ? (
+                    <WeekView
+                        weekDays={weekDays}
+                        appointments={filteredAppointments}
+                        onSlotClick={(date: string, time: string) => openCreate(date, time)}
+                        onApptClick={setSelectedAppt}
+                        onCreateAny={() => openCreate()}
+                        anyFilterActive={anyFilterActive}
+                    />
+                ) : (
+                    <MonthView
+                        currentDate={currentDate}
+                        monthGridStart={monthGridStart}
+                        monthGridEnd={monthGridEnd}
+                        appointments={filteredAppointments}
+                        onDayClick={(d: string) => {
+                            const [y, m, dd] = d.split("-").map(Number);
+                            setCurrentDate(new Date(y, m - 1, dd));
+                            setView("day");
+                        }}
+                        onApptClick={setSelectedAppt}
+                        onCreateAny={() => openCreate()}
+                        anyFilterActive={anyFilterActive}
+                    />
+                )}
+
+                {/* ─── DragOverlay ─── */}
+                <DragOverlay dropAnimation={null}>
+                    {draggingAppt ? (
+                        <div
+                            className={`w-44 rounded-lg border px-2.5 py-1.5 text-sm font-medium shadow-xl opacity-90 pointer-events-none ${statusMeta(draggingAppt.status).chip} ${doctorAccent(draggingAppt.doctorId)}`}
+                        >
+                            <div className="font-bold truncate">{draggingAppt.patientName}</div>
+                            <div className="text-[11px] opacity-75 font-mono">{draggingAppt.timeSlot}</div>
+                        </div>
+                    ) : null}
+                </DragOverlay>
+
+                {/* ─── Details panel (modal) ─── */}
+                {selectedAppt && (
+                    <DetailsPanel
+                        appt={selectedAppt}
+                        onClose={() => setSelectedAppt(null)}
+                        onEdit={openEdit}
+                        onConfirm={handleConfirmAppt}
+                        onComplete={handleCompleteAppt}
+                        onCancel={handleCancelAppt}
+                        onDelete={handleDeleteAppt}
+                        onWhatsApp={sendWaReminder}
+                        pending={statusMutation.isPending || deleteMutation.isPending}
+                    />
+                )}
+
+                {/* ─── Create/Edit Dialog ─── */}
+                {showDialog && (
+                    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={closeDialog}>
+                        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                            <h3 className="text-xl font-bold text-gray-900 mb-1">
+                                {editingAppointment ? "Edit Appointment" : "New Appointment"}
+                            </h3>
+                            <p className="text-xs text-gray-500 mb-4">
+                                Tip: click empty slots in day/week views to create at a specific time.
+                            </p>
+
+                            {/* Error banner */}
+                            {formError && (
+                                <div
+                                    role="alert"
+                                    className={`mb-4 rounded-xl border px-4 py-3 text-sm ${formError.kind === "doctor_conflict" || formError.kind === "patient_conflict"
+                                        ? "bg-rose-50 border-rose-200 text-rose-800"
+                                        : formError.kind === "working-hours"
+                                            ? "bg-amber-50 border-amber-200 text-amber-800"
+                                            : "bg-gray-50 border-gray-200 text-gray-700"
+                                        }`}
+                                >
+                                    <p className="font-semibold mb-0.5">
+                                        {formError.kind === "doctor_conflict" && "⚠ Time conflict"}
+                                        {formError.kind === "patient_conflict" && "⚠ Patient already has appointment"}
+                                        {formError.kind === "working-hours" && "⚠ Outside working hours"}
+                                        {formError.kind === "generic" && "Could not save appointment"}
+                                    </p>
+                                    <p>{formError.message}</p>
+                                    {(formError.kind === "doctor_conflict" || formError.kind === "patient_conflict") && formError.conflict && (
+                                        <p className="mt-1 text-xs opacity-90">
+                                            {formError.kind === "patient_conflict"
+                                                ? "This patient already has another appointment at this time: "
+                                                : "Conflicts with "}
+                                            <span className="font-semibold">
+                                                {formError.conflict.patientName || "another appointment"}
+                                            </span>{" "}
+                                            — {formError.conflict.doctorName || "same doctor"} on{" "}
+                                            {formError.conflict.appointmentDate} at {formError.conflict.timeSlot}
+                                            {formError.conflict.duration ? ` (${formError.conflict.duration}m)` : ""}.
+                                            Pick a different time, doctor, or duration.
+                                        </p>
+                                    )}
+                                </div>
+                            )}
+
+                            <form onSubmit={handleSubmit} className="space-y-4">
+                                {/* Patient picker */}
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-1">Patient</label>
+                                    {selectedPatient ? (
+                                        <div className="flex items-center gap-2 px-3 py-2 bg-primary-50 border border-primary-200 rounded-lg">
+                                            <span className="font-semibold text-primary-700">
+                                                {selectedPatient.firstName} {selectedPatient.lastName}
+                                            </span>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setSelectedPatient(null);
+                                                    setSearchQuery("");
+                                                }}
+                                                className="ml-auto text-primary-400 hover:text-primary-600"
+                                            >
+                                                ✕
+                                            </button>
+                                        </div>
+                                    ) : (
+                                        <div className="relative">
+                                            <input
+                                                type="text"
+                                                value={searchQuery}
+                                                onChange={(e) => setSearchQuery(e.target.value)}
+                                                placeholder="Search existing patient by name or phone..."
+                                                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 outline-none text-sm"
+                                                autoFocus
+                                            />
+                                            {searchResults.length > 0 && (
+                                                <div className="absolute top-full left-0 right-0 mt-1 bg-white border rounded-lg shadow-lg max-h-40 overflow-y-auto z-10">
+                                                    {searchResults.map((p: any) => {
+                                                        const cleanFatherName = p.fatherName && p.fatherName !== "." && p.fatherName !== "—" ? `${p.fatherName} ` : "";
+                                                        const cleanLastName = p.lastName && p.lastName !== "." && p.lastName !== "—" ? p.lastName : "";
+                                                        return (
+                                                            <button
+                                                                key={p.id}
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setSelectedPatient(p);
+                                                                    setSearchQuery("");
+                                                                }}
+                                                                className="w-full text-left px-3 py-2 hover:bg-primary-50 transition text-sm flex items-center justify-between"
+                                                            >
+                                                                <span className="font-semibold">
+                                                                    {p.firstName} {cleanFatherName}{cleanLastName}
+                                                                </span>
+                                                                <div className="text-right">
+                                                                    {p.phone && p.phone !== "0" && <span className="text-gray-500 font-mono text-xs">{p.phone}</span>}
+                                                                    {!p.phone || p.phone === "0" ? <span className="text-gray-300 italic text-xs">No phone</span> : null}
+                                                                </div>
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-1">Date</label>
+                                        <input
+                                            type="date"
+                                            value={formDate}
+                                            onChange={(e) => setFormDate(e.target.value)}
+                                            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 outline-none"
+                                            required
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-1">Time</label>
+                                        <select
+                                            value={formTime}
+                                            onChange={(e) => setFormTime(e.target.value)}
+                                            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 outline-none"
+                                        >
+                                            {TIME_SLOTS.map((t) => (
+                                                <option key={t} value={t}>{t}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-1">Duration (min)</label>
+                                        <select
+                                            value={formDuration}
+                                            onChange={(e) => setFormDuration(Number(e.target.value))}
+                                            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 outline-none"
+                                        >
+                                            {[15, 30, 45, 60, 90, 120].map((d) => (
+                                                <option key={d} value={d}>{d} min</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-semibold text-gray-700 mb-1">Type</label>
+                                        <select
+                                            value={formType}
+                                            onChange={(e) => setFormType(e.target.value)}
+                                            className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 outline-none"
+                                        >
+                                            <option value="consultation">Consultation</option>
+                                            <option value="follow-up">Follow-up</option>
+                                            <option value="procedure">Procedure</option>
+                                            <option value="emergency">Emergency</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-1">Doctor</label>
+                                    <select
+                                        value={formDoctorId}
+                                        onChange={(e) => setFormDoctorId(e.target.value)}
+                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 outline-none"
+                                        required
+                                    >
+                                        {doctorList.map((d) => (
+                                            <option key={d.id} value={d.id}>{d.name}</option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-1">Notes</label>
+                                    <textarea
+                                        value={formNotes}
+                                        onChange={(e) => setFormNotes(e.target.value)}
+                                        rows={2}
+                                        className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-primary-500 outline-none resize-none"
+                                        placeholder="Optional notes..."
+                                    />
+                                </div>
+
+                                <div className="flex gap-3 pt-2">
+                                    <button
+                                        type="button"
+                                        onClick={closeDialog}
+                                        className="flex-1 px-4 py-2 border border-gray-300 rounded-lg font-semibold text-gray-700 hover:bg-gray-50 transition"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        disabled={!selectedPatient || createMutation.isPending || updateMutation.isPending}
+                                        className="flex-1 px-4 py-2 bg-primary-600 text-white font-bold rounded-lg hover:bg-primary-700 transition disabled:opacity-50"
+                                    >
+                                        {editingAppointment ? "Update" : "Book"}
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                )}
+            </div>
+        </DndContext>
     );
 }
 
@@ -791,6 +935,10 @@ function Legend() {
             </span>
             <span className="inline-flex items-center gap-1.5 text-gray-600">
                 <span className="w-1 h-3.5 rounded bg-purple-500" /> Dr. Layla
+            </span>
+            <span className="hidden sm:inline mx-2 h-4 w-px bg-gray-200" />
+            <span className="inline-flex items-center gap-1.5 text-gray-400 italic">
+                ↕ drag scheduled/confirmed cards to reschedule
             </span>
         </div>
     );
@@ -829,7 +977,43 @@ function EmptyState({
     );
 }
 
-// ─── Appointment Card (used in day/week) ────────────────────────────
+// ─── DraggableCard ──────────────────────────────────────────────────
+
+function DraggableCard({
+    appt,
+    onClick,
+    compact = false,
+}: {
+    appt: Appointment;
+    onClick: () => void;
+    compact?: boolean;
+}) {
+    const draggable = isDraggable(appt);
+    const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+        id: appt.id,
+        data: appt,
+        disabled: !draggable,
+    });
+
+    return (
+        <div
+            ref={setNodeRef}
+            {...(draggable ? listeners : {})}
+            {...(draggable ? attributes : {})}
+            style={{ opacity: isDragging ? 0.25 : 1, cursor: draggable ? "grab" : "default" }}
+            className="touch-none select-none"
+        >
+            <AppointmentCard appt={appt} onClick={onClick} compact={compact} />
+            {draggable && !compact && (
+                <div className="text-[9px] text-gray-400 text-center mt-0.5 select-none pointer-events-none leading-none">
+                    ↕ drag to reschedule
+                </div>
+            )}
+        </div>
+    );
+}
+
+// ─── AppointmentCard ────────────────────────────────────────────────
 
 function AppointmentCard({
     appt,
@@ -869,6 +1053,67 @@ function AppointmentCard({
                 <div className="text-[11px] mt-0.5 opacity-70 italic truncate">{appt.doctorName}</div>
             )}
         </button>
+    );
+}
+
+// ─── DroppableDaySlot ───────────────────────────────────────────────
+
+function DroppableDaySlot({
+    date,
+    time,
+    isSunday,
+    children,
+    onClick,
+}: {
+    date: string;
+    time: string;
+    isSunday: boolean;
+    children: React.ReactNode;
+    onClick: () => void;
+}) {
+    const id = `slot::${date}::${time}`;
+    const { setNodeRef, isOver } = useDroppable({ id, disabled: isSunday });
+    return (
+        <div
+            ref={setNodeRef}
+            className={`flex-1 px-2 py-1.5 flex flex-wrap gap-2 transition-colors rounded-sm ${isOver && !isSunday
+                ? "bg-primary-100/70 ring-2 ring-inset ring-primary-400"
+                : ""
+                }`}
+            onClick={onClick}
+        >
+            {children}
+        </div>
+    );
+}
+
+// ─── DroppableWeekCell ──────────────────────────────────────────────
+
+function DroppableWeekCell({
+    date,
+    time,
+    isSunday,
+    className,
+    onClick,
+    children,
+}: {
+    date: string;
+    time: string;
+    isSunday: boolean;
+    className: string;
+    onClick: () => void;
+    children: React.ReactNode;
+}) {
+    const id = `slot::${date}::${time}`;
+    const { setNodeRef, isOver } = useDroppable({ id, disabled: isSunday });
+    return (
+        <td
+            ref={setNodeRef}
+            className={`${className} ${isOver && !isSunday ? "bg-primary-100/70 ring-2 ring-inset ring-primary-400" : ""}`}
+            onClick={onClick}
+        >
+            {children}
+        </td>
     );
 }
 
@@ -919,8 +1164,7 @@ function DayView({
                 return (
                     <div
                         key={time}
-                        className={`flex border-b border-gray-100 last:border-b-0 transition min-h-[56px] ${isSunday ? "bg-gray-50/60 cursor-not-allowed" : "hover:bg-gray-50/50 cursor-pointer"}`}
-                        onClick={() => !isSunday && slotAppts.length === 0 && onSlotClick(time)}
+                        className={`flex border-b border-gray-100 last:border-b-0 transition min-h-[56px] ${isSunday ? "bg-gray-50/60 cursor-not-allowed" : "hover:bg-gray-50/30 cursor-pointer"}`}
                     >
                         <div className="w-20 sm:w-24 flex-shrink-0 px-3 py-2 text-sm font-semibold text-gray-400 border-r border-gray-100 flex items-center justify-between gap-1">
                             <span className="font-mono">{time}</span>
@@ -938,17 +1182,24 @@ function DayView({
                                 +
                             </button>
                         </div>
-                        <div className="flex-1 px-2 py-1.5 flex flex-wrap gap-2">
+                        <DroppableDaySlot
+                            date={date}
+                            time={time}
+                            isSunday={isSunday}
+                            onClick={() => !isSunday && slotAppts.length === 0 && onSlotClick(time)}
+                        >
                             {slotAppts.length === 0 ? (
-                                <span className="text-xs text-gray-300 self-center">{isSunday ? "clinic closed" : "click to book"}</span>
+                                <span className="text-xs text-gray-300 self-center">
+                                    {isSunday ? "clinic closed" : "click to book"}
+                                </span>
                             ) : (
                                 slotAppts.map((appt) => (
                                     <div key={appt.id} className="min-w-[180px] max-w-[260px]">
-                                        <AppointmentCard appt={appt} onClick={() => onApptClick(appt)} />
+                                        <DraggableCard appt={appt} onClick={() => onApptClick(appt)} />
                                     </div>
                                 ))
                             )}
-                        </div>
+                        </DroppableDaySlot>
                     </div>
                 );
             })}
@@ -1039,17 +1290,20 @@ function WeekView({
                                             (a.timeSlot === time || a.timeSlot === `${time.split(":")[0]}:30`)
                                     );
                                     return (
-                                        <td
+                                        <DroppableWeekCell
                                             key={d}
+                                            date={d}
+                                            time={time}
+                                            isSunday={isSunday}
                                             className={`border-b border-gray-100 px-1 py-1 align-top min-w-[110px] ${isToday ? "bg-primary-50/30" : ""} ${isSunday ? "bg-gray-100/70 cursor-not-allowed" : "cursor-pointer"}`}
                                             onClick={() => !isSunday && dayAppts.length === 0 && onSlotClick(d, time)}
                                         >
                                             {dayAppts.map((appt) => (
                                                 <div key={appt.id} className="mb-1 last:mb-0">
-                                                    <AppointmentCard appt={appt} onClick={() => onApptClick(appt)} compact />
+                                                    <DraggableCard appt={appt} onClick={() => onApptClick(appt)} compact />
                                                 </div>
                                             ))}
-                                        </td>
+                                        </DroppableWeekCell>
                                     );
                                 })}
                             </tr>
@@ -1126,7 +1380,7 @@ function MonthView({
                 ))}
             </div>
 
-            {/* Day cells */}
+            {/* Day cells — no DnD in month view (deferred to Phase 4D) */}
             <div className="grid grid-cols-7">
                 {days.map((day) => {
                     const d = format(day, "yyyy-MM-dd");

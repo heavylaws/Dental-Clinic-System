@@ -453,6 +453,54 @@ Distinct empty states per view:
 
 ---
 
+## Phase 4C — Drag-and-Drop Rescheduling
+
+**Status:** ✅ COMPLETE
+
+### Goal
+Enable drag-and-drop rescheduling in desktop Day/Week views while preserving all Phase 4A safety validation and all Phase 4B UI behaviors. Mobile remains unchanged.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `client/src/pages/Appointments.tsx` | Added `@dnd-kit/core` integration for Day/Week drag-and-drop rescheduling (`DndContext`, `DragOverlay`, `useDraggable`, `useDroppable`, `PointerSensor`) with Sunday guards, success/error DnD banners, and existing details panel actions preserved |
+| `package.json` | Added dependency `@dnd-kit/core` |
+| `package-lock.json` | Lockfile updates for `@dnd-kit/core` and transitive resolution |
+| `PRODUCT_PHASES.md` | This entry |
+
+### Implementation Notes
+
+- Drag sources are restricted to active statuses only: `scheduled`, `confirmed`.
+- Drop targets use slot ids in `slot::{date}::{time}` format and call existing `PUT /api/appointments/:id` update flow.
+- Reschedule payload preserves appointment data: `patientId`, `doctorId`, `type`, `status`, `duration`, `notes` while changing `appointmentDate`/`timeSlot`.
+- Sunday drop/create is blocked by both UI guards and existing backend validation.
+- Month view remains non-DnD in this phase by design.
+
+### Safety Compatibility (Phase 4A)
+
+- Backend validations are unchanged and still enforce:
+  - `doctor_conflict` (409)
+  - `patient_conflict` (409)
+  - working-hours rejection (400)
+  - Sunday rejection (400)
+- Cancel/delete/edit/WhatsApp/details flows remain routed through the existing Phase 4A endpoints and handlers.
+
+### Build + Typecheck Snapshot
+
+- `npx vite build` passes.
+- `npx tsc -p tsconfig.server.json` passes.
+- `npx tsc --noEmit` currently fails due to pre-existing errors outside `Appointments.tsx`.
+- `Appointments.tsx` has zero TS errors in the current workspace diagnostics.
+
+### Known Limitations
+
+- Month view drag-and-drop is deferred.
+- Week grid drag target granularity is hour-row based in compact mode.
+- Mobile does not implement drag-and-drop and remains unchanged by this phase.
+
+---
+
 ## Future Phases (Not Yet Defined)
 
 To be filled in by product owner.
