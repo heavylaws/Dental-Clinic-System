@@ -626,6 +626,141 @@ Three distinct empty states, all with icon + title + subtitle:
 
 ---
 
+## Phase 5A — Reminder Foundation + Manual Send + Notification Log
+
+**Status:** ✅ COMPLETE
+
+### Goal
+
+Allow staff to manually send appointment reminders, log every reminder attempt, and prepare the backend foundation for automatic reminders later (Phase 5B cron). No scheduled automation added in this phase.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `server/modules/reminder/index.ts` | **New** — `GET /api/reminders/logs` (filterable) and `POST /api/reminders/send` with WhatsApp dispatch, SMS/email stubs, in-memory log store |
+| `server/index.ts` | Imported and mounted `reminderRouter` at `/api/reminders` |
+| `client/src/lib/api.ts` | Added `api.reminders.logs(params?)` and `api.reminders.send(payload)` |
+| `client/src/pages/Appointments.tsx` | Added `reminderMutation`, `reminderResult` state, and `handleSendReminder`. Updated `DetailsPanel` to accept reminder props; added "🔔 Send Reminder" button, result banner, and mini reminder log panel showing last 5 attempts |
+| `client/src/mobile/pages/MobileAppointments.tsx` | Added `reminderMutation`, `reminderBanner` state, a "🔔 Reminder" button in each card's action row (phone-gated), and a dismissible result banner above the list |
+| `PRODUCT_PHASES.md` | This entry |
+
+### New Endpoints
+
+#### `GET /api/reminders/logs` (auth required)
+
+Query params (all optional): `appointmentId`, `patientId`, `status`, `from` (ISO date/datetime), `to` (ISO date/datetime).
+
+Returns `ReminderLog[]` sorted newest first.
+
+#### `POST /api/reminders/send` (auth required)
+
+Body:
+```json
+{ "appointmentId": "string", "channel": "whatsapp|sms|email", "message": "optional override" }
+```
+
+Default channel: `whatsapp`.
+
+Response:
+```json
+{ "success": boolean, "message": "string", "waUrl": "string|undefined", "log": ReminderLog }
+```
+
+### ReminderLog Shape
+
+```ts
+{
+  id: string,
+  appointmentId: string,
+  patientId: string | null,
+  patientName: string,
+  phone: string | null,
+  channel: "whatsapp" | "sms" | "email",
+  status: "sent" | "failed" | "stubbed" | "not_configured",
+  message: string,
+  error?: string,
+  waUrl?: string,
+  sentAt: string,
+  appointmentDate: string,
+  timeSlot: string
+}
+```
+
+### Reminder Message Template
+
+```
+Hello {patientName}, this is a reminder for your dental appointment on {appointmentDate} at {timeSlot}. Please contact us if you need to reschedule.
+```
+
+Custom `message` in POST body overrides the default.
+
+### WhatsApp Behavior
+
+The system uses the existing `whatsapp-web.js` backend client (`server/modules/whatsapp/index.ts`).
+
+| WhatsApp client state | Result |
+|-----------------------|--------|
+| Connected + ready | `status: "sent"` — message delivered via `waClient.sendMessage()` |
+| Not connected / not authenticated | `status: "stubbed"` — no fake delivery; a `wa.me/…?text=…` URL is returned so staff can send manually |
+
+**No false delivery is claimed.** If WhatsApp is not connected, the response explicitly says so and provides a `waUrl` link.
+
+### SMS / Email Behavior
+
+Both are stubs in Phase 5A. They create a log entry with `status: "not_configured"` and return HTTP 200 with `success: false`. No external provider is required.
+
+### No-Phone Handling
+
+If the patient has no phone number:
+- A `status: "failed"` log is created with `error: "Patient phone number is missing"`.
+- HTTP 400 is returned with a clear message.
+- No crash.
+
+### Desktop UI Changes (`Appointments.tsx`)
+
+Inside the `DetailsPanel` (appointment details modal), below the existing Edit / WhatsApp / Delete tools:
+
+- A **"🔔 Send Reminder"** button (violet) calls `POST /api/reminders/send` with the current appointment.
+- While pending: button shows a spinner and "Sending…".
+- On success: green banner "✓ Reminder sent successfully."
+- On stubbed (WA not connected): amber banner with explanation + "Open in WhatsApp Web →" link.
+- On error (no phone, etc.): rose banner with the error message.
+- Result banner is dismissible (×) and clears when the panel is closed.
+- A **mini reminder log** panel shows the last 5 reminder attempts for that appointment (channel, status, time), loaded via `GET /api/reminders/logs?appointmentId=…`.
+- All existing actions preserved: Edit, Confirm, Complete, Cancel, WhatsApp, Delete.
+- Drag-and-drop is unaffected (reminder button is inside the modal, not on calendar cards).
+- Conflict detection and scheduling validation are unaffected.
+
+### Mobile Changes (`MobileAppointments.tsx`)
+
+A lightweight **"🔔 Reminder"** button (purple tint) is added to each appointment card's action row.
+
+- Only shown when the appointment has a phone number (same gate as the Call/WhatsApp buttons).
+- Taps call `POST /api/reminders/send`.
+- A dismissible result banner (success/stubbed/error) appears above the list.
+- Existing actions (📞 Call, 💬 WhatsApp, ✓ Confirm, ✔ Complete, ✕ Cancel) are fully preserved.
+- No layout redesign. No drag-and-drop. No new dependencies.
+
+### Build Results
+
+| Command | Result |
+|---------|--------|
+| `npx tsc --noEmit` | ✅ exit 0 |
+| `npx vite build` | ✅ no errors |
+| `npx tsc -p tsconfig.server.json` | ✅ exit 0 |
+
+### Known Limitations
+
+- **No cron automation** — Phase 5B will add scheduled automatic reminders.
+- **Reminder log is in-memory** — `demoReminderLogs` resets on server restart. A proper DB table migration is deferred to a later phase (documented as TODO in the module).
+- **SMS and email are stubs** — they log `not_configured`. Real SMS/email providers are Phase 5C or later.
+- **Backend WhatsApp requires the client to be connected** — staff must connect via `/api/whatsapp/connect` first. If not connected, a `wa.me` URL is provided instead.
+- **No patient opt-out** — patient reminder preference fields are not in the current schema. Sending is not blocked by opt-out in Phase 5A (TODO: Phase 5C patient preferences).
+- **wa.me URL is built from phone digits** — country code is assumed to be present in the stored phone number. International format (e.g. `+218xxxxxxxx`) works correctly; local-format numbers may need a country code prefix in Phase 5C.
+
+---
+
 ## Future Phases (Not Yet Defined)
 
 To be filled in by product owner.

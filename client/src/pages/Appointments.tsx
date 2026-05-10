@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import {
@@ -446,6 +446,45 @@ export default function Appointments() {
         waMutation.mutate(appt);
     }
 
+    // ─── Reminder send (Phase 5A) ─────────────────────────────────────
+
+    const [reminderPanelApptId, setReminderPanelApptId] = useState<string | null>(null);
+    const [reminderResult, setReminderResult] = useState<{
+        kind: "success" | "stubbed" | "error";
+        message: string;
+        waUrl?: string;
+    } | null>(null);
+
+    const reminderMutation = useMutation({
+        mutationFn: (appt: Appointment) =>
+            api.reminders.send({ appointmentId: appt.id, channel: "whatsapp" }),
+        onSuccess: (data, appt) => {
+            if (data.success) {
+                setReminderResult({ kind: "success", message: "Reminder sent successfully." });
+            } else if (data.waUrl) {
+                setReminderResult({
+                    kind: "stubbed",
+                    message: data.message,
+                    waUrl: data.waUrl,
+                });
+            } else {
+                setReminderResult({ kind: "error", message: data.message });
+            }
+            // Refresh log panel for this appointment
+            void queryClient.invalidateQueries({ queryKey: ["reminder-logs", appt.id] });
+        },
+        onError: (e: any) => {
+            const msg: string = e?.body?.message || e?.message || "Failed to send reminder.";
+            setReminderResult({ kind: "error", message: msg });
+        },
+    });
+
+    const handleSendReminder = useCallback((appt: Appointment) => {
+        setReminderResult(null);
+        setReminderPanelApptId(appt.id);
+        reminderMutation.mutate(appt);
+    }, [reminderMutation]);
+
     // ─── Filter options ─────────────────────────────────────────────
 
     const typeOptions = useMemo(() => {
@@ -695,13 +734,17 @@ export default function Appointments() {
                 {selectedAppt && (
                     <DetailsPanel
                         appt={selectedAppt}
-                        onClose={() => setSelectedAppt(null)}
+                        onClose={() => { setSelectedAppt(null); setReminderResult(null); }}
                         onEdit={openEdit}
                         onConfirm={handleConfirmAppt}
                         onComplete={handleCompleteAppt}
                         onCancel={handleCancelAppt}
                         onDelete={handleDeleteAppt}
                         onWhatsApp={sendWaReminder}
+                        onSendReminder={handleSendReminder}
+                        reminderPending={reminderMutation.isPending && reminderPanelApptId === selectedAppt.id}
+                        reminderResult={reminderPanelApptId === selectedAppt.id ? reminderResult : null}
+                        onClearReminderResult={() => setReminderResult(null)}
                         pending={statusMutation.isPending || deleteMutation.isPending}
                     />
                 )}
@@ -1461,6 +1504,10 @@ function DetailsPanel({
     onCancel,
     onDelete,
     onWhatsApp,
+    onSendReminder,
+    reminderPending,
+    reminderResult,
+    onClearReminderResult,
     pending,
 }: {
     appt: Appointment;
@@ -1471,12 +1518,22 @@ function DetailsPanel({
     onCancel: (appt: Appointment) => void;
     onDelete: (appt: Appointment) => void;
     onWhatsApp: (appt: Appointment) => void;
+    onSendReminder: (appt: Appointment) => void;
+    reminderPending: boolean;
+    reminderResult: { kind: "success" | "stubbed" | "error"; message: string; waUrl?: string } | null;
+    onClearReminderResult: () => void;
     pending: boolean;
 }) {
     const sm = statusMeta(appt.status);
     const tm = typeMeta(appt.type);
     const sk = statusKey(appt.status);
     const isClosed = sk === "cancelled" || sk === "completed";
+
+    // Mini reminder log — fetched per appointment
+    const { data: reminderLogs = [] } = useQuery<any[]>({
+        queryKey: ["reminder-logs", appt.id],
+        queryFn: () => api.reminders.logs({ appointmentId: appt.id }),
+    });
 
     return (
         <div
@@ -1557,7 +1614,7 @@ function DetailsPanel({
                 )}
 
                 {/* Tools */}
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-2 mb-4">
                     <button
                         onClick={() => onEdit(appt)}
                         className="flex-1 px-3 py-2 bg-primary-600 text-white text-sm font-bold rounded-lg hover:bg-primary-700 transition"
@@ -1581,6 +1638,103 @@ function DetailsPanel({
                     >
                         🗑 Delete
                     </button>
+                </div>
+
+                {/* ─── Send Reminder (Phase 5A) ─── */}
+                <div className="border-t border-gray-100 pt-4">
+                    <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-bold uppercase tracking-wide text-gray-400">
+                            Reminder
+                        </span>
+                    </div>
+
+                    <button
+                        type="button"
+                        onClick={() => onSendReminder(appt)}
+                        disabled={reminderPending}
+                        className="w-full px-3 py-2 bg-violet-600 text-white text-sm font-semibold rounded-lg hover:bg-violet-700 transition disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                        {reminderPending ? (
+                            <>
+                                <span className="inline-block w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                                Sending…
+                            </>
+                        ) : (
+                            "🔔 Send Reminder"
+                        )}
+                    </button>
+
+                    {/* Reminder result banner */}
+                    {reminderResult && (
+                        <div
+                            className={`mt-2 rounded-xl border px-3 py-2 text-xs flex items-start justify-between gap-2 ${
+                                reminderResult.kind === "success"
+                                    ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                                    : reminderResult.kind === "stubbed"
+                                    ? "bg-amber-50 border-amber-200 text-amber-800"
+                                    : "bg-rose-50 border-rose-200 text-rose-800"
+                            }`}
+                        >
+                            <div className="flex-1 min-w-0">
+                                <p className="font-semibold">
+                                    {reminderResult.kind === "success" && "✓ Reminder sent"}
+                                    {reminderResult.kind === "stubbed" && "⚠ WhatsApp not connected"}
+                                    {reminderResult.kind === "error" && "✕ Could not send"}
+                                </p>
+                                <p className="opacity-90 mt-0.5">{reminderResult.message}</p>
+                                {reminderResult.waUrl && (
+                                    <a
+                                        href={reminderResult.waUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-block mt-1 underline font-semibold"
+                                    >
+                                        Open in WhatsApp Web →
+                                    </a>
+                                )}
+                            </div>
+                            <button
+                                onClick={onClearReminderResult}
+                                className="shrink-0 text-base leading-none opacity-60 hover:opacity-100"
+                            >
+                                ×
+                            </button>
+                        </div>
+                    )}
+
+                    {/* Mini reminder log */}
+                    {reminderLogs.length > 0 && (
+                        <div className="mt-3">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400 mb-1.5">
+                                Recent reminders
+                            </p>
+                            <div className="space-y-1.5">
+                                {reminderLogs.slice(0, 5).map((log: any) => (
+                                    <div
+                                        key={log.id}
+                                        className={`flex items-center gap-2 text-[11px] px-2.5 py-1.5 rounded-lg border ${
+                                            log.status === "sent"
+                                                ? "bg-emerald-50 border-emerald-100 text-emerald-700"
+                                                : log.status === "stubbed"
+                                                ? "bg-amber-50 border-amber-100 text-amber-700"
+                                                : "bg-rose-50 border-rose-100 text-rose-700"
+                                        }`}
+                                    >
+                                        <span className="shrink-0">
+                                            {log.status === "sent" ? "✓" : log.status === "stubbed" ? "~" : "✕"}
+                                        </span>
+                                        <span className="font-semibold capitalize">{log.channel}</span>
+                                        <span className="opacity-75">
+                                            {log.status}
+                                        </span>
+                                        <span className="ml-auto font-mono opacity-60 shrink-0">
+                                            {log.sentAt ? new Date(log.sentAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

@@ -478,6 +478,41 @@ export const api = {
             }>("/dashboard/summary"),
     },
 
+    // ─── Reminders (Phase 5A) ─────────────────────────────────────────
+
+    reminders: {
+        logs: (params?: {
+            appointmentId?: string;
+            patientId?: string;
+            status?: string;
+            from?: string;
+            to?: string;
+        }) => {
+            const p = new URLSearchParams();
+            if (params?.appointmentId) p.set("appointmentId", params.appointmentId);
+            if (params?.patientId) p.set("patientId", params.patientId);
+            if (params?.status) p.set("status", params.status);
+            if (params?.from) p.set("from", params.from);
+            if (params?.to) p.set("to", params.to);
+            const qs = p.toString();
+            return request<any[]>(`/reminders/logs${qs ? `?${qs}` : ""}`);
+        },
+        send: (payload: {
+            appointmentId: string;
+            channel?: "whatsapp" | "sms" | "email";
+            message?: string;
+        }) =>
+            request<{
+                success: boolean;
+                message: string;
+                waUrl?: string;
+                log: any;
+            }>("/reminders/send", {
+                method: "POST",
+                body: JSON.stringify(payload),
+            }),
+    },
+
     // ─── AI ───────────────────────────────────────────────────────────
 
     ai: {

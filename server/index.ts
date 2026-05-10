@@ -26,6 +26,7 @@ import { procedureCatalogRouter } from "./modules/procedure_catalog/index.js";
 import { recallsRouter } from "./modules/recalls/index.js";
 import { whatsappRouter } from "./modules/whatsapp/index.js";
 import { dashboardRouter } from "./modules/dashboard/index.js";
+import { reminderRouter } from "./modules/reminder/index.js";
 import { setupWebSocket } from "./ws.js";
 import { createAuditMiddleware, auditLog } from "./audit.js";
 import { demoSettings } from "./demo-store.js";
@@ -132,6 +133,7 @@ app.use("/api/procedure-catalog", procedureCatalogRouter);
 app.use("/api/recalls", recallsRouter);
 app.use("/api/whatsapp", whatsappRouter);
 app.use("/api/dashboard", dashboardRouter);
+app.use("/api/reminders", reminderRouter);
 
 // ─── Static file serving for uploads ────────────────────────────────
 

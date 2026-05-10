@@ -111,6 +111,7 @@ export default function MobileAppointments() {
   const [doctorFilter, setDoctorFilter] = useState<string>("all");
   const [globalError, setGlobalError] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<any | null>(null);
+  const [reminderBanner, setReminderBanner] = useState<{ apptId: string; kind: "success" | "stubbed" | "error"; message: string; waUrl?: string } | null>(null);
 
   const dateStr = format(currentDate, "yyyy-MM-dd");
   const todayStr = format(new Date(), "yyyy-MM-dd");
@@ -136,6 +137,25 @@ export default function MobileAppointments() {
       queryClient.invalidateQueries({ queryKey: ["appointments"] });
     },
     onError: (err) => setGlobalError(friendlyError(err)),
+  });
+
+  // ── Reminder mutation (Phase 5A) ──
+  const reminderMutation = useMutation({
+    mutationFn: (appt: any) =>
+      api.reminders.send({ appointmentId: appt.id, channel: "whatsapp" }),
+    onSuccess: (data, appt) => {
+      if (data.success) {
+        setReminderBanner({ apptId: appt.id, kind: "success", message: "Reminder sent." });
+      } else if (data.waUrl) {
+        setReminderBanner({ apptId: appt.id, kind: "stubbed", message: "WhatsApp not connected. Tap to open manually.", waUrl: data.waUrl });
+      } else {
+        setReminderBanner({ apptId: appt.id, kind: "error", message: data.message });
+      }
+    },
+    onError: (err: any) => {
+      const msg: string = err?.body?.message || err?.message || "Failed to send reminder.";
+      setReminderBanner({ apptId: "", kind: "error", message: msg });
+    },
   });
 
   // ── Date navigation ──
@@ -281,6 +301,37 @@ export default function MobileAppointments() {
       {/* ── Global error banner ── */}
       {globalError && (
         <ErrorBanner message={globalError} onDismiss={() => setGlobalError(null)} />
+      )}
+
+      {/* ── Reminder result banner (Phase 5A) ── */}
+      {reminderBanner && (
+        <div style={{
+          margin: "0 16px 10px", padding: "12px 14px", borderRadius: "14px",
+          background: reminderBanner.kind === "success"
+            ? "rgba(16,185,129,0.12)" : reminderBanner.kind === "stubbed"
+            ? "rgba(251,191,36,0.1)" : "rgba(244,63,94,0.12)",
+          border: `1px solid ${reminderBanner.kind === "success" ? "rgba(16,185,129,0.25)" : reminderBanner.kind === "stubbed" ? "rgba(251,191,36,0.2)" : "rgba(244,63,94,0.25)"}`,
+          display: "flex", alignItems: "flex-start", gap: "10px",
+        }}>
+          <span style={{ fontSize: "15px", flexShrink: 0 }}>
+            {reminderBanner.kind === "success" ? "✓" : reminderBanner.kind === "stubbed" ? "⚠️" : "✕"}
+          </span>
+          <div style={{ flex: 1 }}>
+            <span style={{
+              fontSize: "0.83rem", fontWeight: 600, lineHeight: 1.4,
+              color: reminderBanner.kind === "success" ? "#34d399" : reminderBanner.kind === "stubbed" ? "#fbbf24" : "#fb7185",
+            }}>{reminderBanner.message}</span>
+            {reminderBanner.waUrl && (
+              <a href={reminderBanner.waUrl} target="_blank" rel="noopener noreferrer" style={{
+                display: "block", marginTop: "4px", fontSize: "0.78rem", color: "#25d366", fontWeight: 700,
+              }}>Open in WhatsApp →</a>
+            )}
+          </div>
+          <button onClick={() => setReminderBanner(null)} style={{
+            background: "transparent", border: "none", color: "#64748b",
+            fontSize: "16px", cursor: "pointer", flexShrink: 0, padding: 0,
+          }}>✕</button>
+        </div>
       )}
 
       {/* ── List ── */}
@@ -458,6 +509,18 @@ export default function MobileAppointments() {
                           background: "rgba(244,63,94,0.1)", border: "1px solid rgba(244,63,94,0.2)",
                           color: "#fb7185", cursor: "pointer",
                         }}>✕ Cancel</button>
+                    )}
+
+                    {/* Reminder (Phase 5A) */}
+                    {phone && (
+                      <button
+                        disabled={reminderMutation.isPending}
+                        onClick={() => { setReminderBanner(null); reminderMutation.mutate(appt); }}
+                        className="touch-button" style={{
+                          padding: "7px 12px", borderRadius: "10px", fontSize: "0.75rem", fontWeight: 700,
+                          background: "rgba(139,92,246,0.1)", border: "1px solid rgba(139,92,246,0.2)",
+                          color: "#a78bfa", cursor: "pointer",
+                        }}>🔔 Reminder</button>
                     )}
                   </div>
                 </div>
