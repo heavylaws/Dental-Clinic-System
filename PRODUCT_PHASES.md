@@ -1824,6 +1824,145 @@ Returns aging for a single patient.
 
 ---
 
+## Phase 6D2 — Dashboard + Reports Financial Integration
+
+**Status:** ✅ COMPLETE
+
+### Goal
+
+Surface existing aging and receivables insights from Phase 6D1 in the Dashboard and Reports pages. Make the clinic owner immediately see financial risk and unpaid balances without navigating to Billing.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `client/src/pages/Dashboard.tsx` | Added aging query, Receivables Aging card section with bucket summary, Top Overdue Patients mini list, Billing link |
+| `client/src/pages/Reports.tsx` | Added aging query, Aging / Receivables section in Owner Analytics with bucket cards, Top Overdue Patients table with full columns |
+| `PRODUCT_PHASES.md` | This entry |
+
+### Data Source / Reuse
+
+**All aging values come from existing server-side endpoints:**
+
+- `api.ledger.aging()` → `GET /api/ledger/aging`
+- No duplicated aging math in frontend
+- No hardcoded financial numbers
+- No fake frontend calculations
+
+The Dashboard and Reports consume the same aging data as the Billing page:
+- `asOf` timestamp
+- `totals`: totalBalance, current, days31to60, days61to90, over90, patientCount, overduePatientCount
+- `patients[]`: patientId, patientName, totalBalance, buckets, oldestUnpaidDate, lastPaymentDate
+
+### Dashboard Integration
+
+**Receivables Aging Card (new):**
+- Positioned after KPI Cards, before Trend + Unpaid Invoices
+- Shows:
+  - Total Outstanding (large value)
+  - Patient count and overdue patient count
+  - Four colored bucket cards: 0–30 (green), 31–60 (amber), 61–90 (orange), 90+ (red)
+  - Link to Billing page "View in Billing →"
+- Loading and error states handled
+- Hidden if no outstanding balances (clean empty state)
+
+**Top Overdue Patients Mini List (new):**
+- Shows up to 5 patients with overdue buckets (>30 days)
+- Color-coded severity indicator (left border):
+  - Red: has 90+ days balance
+  - Orange: has 61–90 days balance
+  - Amber: has 31–60 days balance
+  - Green: has current balance only
+- Click row → navigate to `/patient/:id`
+- Shows:
+  - Patient name
+  - Total balance (rose-600)
+  - Oldest unpaid date
+  - 90+ amount if applicable
+
+**Preserved Features:**
+- KPI cards (Today's Revenue, Appointments, Outstanding, etc.)
+- 30-Day Revenue Trend chart
+- Top Unpaid Invoices
+- Today's Appointments
+- Search + Queue
+- All quick actions
+
+### Reports Integration
+
+**Aging / Receivables Section (new):**
+- Positioned in Owner Analytics tab after KPI Cards, before Revenue Trend
+- Shows:
+  - Section header with patient count, overdue count, link to Billing
+  - Total Outstanding (large value)
+  - Four colored bucket summary cards
+  - Top Overdue Patients table (up to 10 rows)
+
+**Aging Table Columns:**
+- Patient (name)
+- Total Balance (rose-600, bold)
+- 0–30 (emerald, shows value or "—")
+- 31–60 (amber)
+- 61–90 (orange)
+- 90+ (rose, highlighted with rose-50 background when non-zero)
+- Oldest Unpaid
+- Last Payment
+
+**Table Behavior:**
+- Click row → navigate to `/patient/:id`
+- Sorted by totalBalance descending (server-side)
+- Shows top 10 overdue patients
+- Loading, error, empty states handled
+
+**Preserved Features:**
+- KPI Cards (Collected, Billed, Outstanding, Collection Rate, Visits, Avg Ticket)
+- Revenue Trend chart
+- Doctor Production table
+- Top Procedures chart
+- Patient Growth chart
+- Export CSV (unchanged)
+- Print/PDF (unchanged)
+- Prescription Report tab (unchanged)
+
+### CSV/Print Export Behavior
+
+**Export CSV:**
+- Unchanged — aging section NOT added to CSV
+- Reason: CSV structure is complex; adding aging would require restructuring or appending sections
+- Documented as known limitation (deferred)
+
+**Print/PDF:**
+- Unchanged — aging section NOT added to print template
+- Reason: Print template is tightly formatted; adding sections risks breaking layout
+- Documented as known limitation (deferred)
+
+### Mobile Decision
+
+**No mobile changes.**
+
+- Mobile aging dashboard/report UI deferred
+- Mobile `/m` and `/m/appointments` must still build and run
+- Verified: no mobile file modifications made
+
+### Build Results
+
+| Command | Result |
+|---------|--------|
+| `npx tsc --noEmit` | ✅ exit 0 |
+| `npx vite build` | ✅ no errors |
+| `npx tsc -p tsconfig.server.json` | ✅ exit 0 |
+
+### Known Limitations
+
+- **Aging math remains server-side Phase 6D1 FIFO** — Dashboard/Reports only consume data
+- **CSV export does NOT include aging section** — deferred to future phase
+- **Print/PDF does NOT include aging section** — deferred to future phase
+- **Mobile aging dashboard/report UI deferred** — desktop only
+- **Production still needs DB-backed allocation persistence** (same as Phase 6D1)
+- **Top overdue patients limited to 5 in Dashboard, 10 in Reports** — click through to Billing for full list
+
+---
+
 ## Future Phases (Not Yet Defined)
 
 To be filled in by product owner.

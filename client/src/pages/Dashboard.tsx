@@ -208,6 +208,13 @@ export default function Dashboard({ user }: DashboardProps) {
         queryFn: () => api.followUps.upcoming(),
     });
 
+    // ─── Aging query (Phase 6D2) ─────────────────────────────────────
+    const { data: agingData, isLoading: isLoadingAging, isError: isAgingError } = useQuery({
+        queryKey: ["ledger", "aging"],
+        queryFn: () => api.ledger.aging(),
+        refetchInterval: 60000,
+    });
+
     const { data: serverInfo } = useQuery({
         queryKey: ["settings", "server-info"],
         queryFn: () => api.settings.serverInfo(),
@@ -343,6 +350,105 @@ export default function Dashboard({ user }: DashboardProps) {
                             helper={`${today.noShows} of ${today.appointments} today`}
                             accent="bg-amber-50 text-amber-600"
                         />
+                    </div>
+                )}
+
+                {/* ═══ Receivables Aging Card (Phase 6D2) ═══════════════════ */}
+                {isLoadingAging ? (
+                    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                        <div className="flex items-center gap-3 text-gray-500">
+                            <div className="animate-spin h-5 w-5 border-b-2 border-gray-600"></div>
+                            <span>Loading receivables aging...</span>
+                        </div>
+                    </div>
+                ) : isAgingError ? (
+                    <div className="bg-white rounded-2xl shadow-sm border border-red-200 p-6 text-red-600">
+                        Unable to load receivables aging.
+                    </div>
+                ) : agingData && agingData.patients.length > 0 && (
+                    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
+                            <div>
+                                <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                                    ⏰ Receivables Aging
+                                </h2>
+                                <p className="text-sm text-gray-500">
+                                    {agingData.totals.patientCount} patients · {agingData.totals.overduePatientCount} overdue
+                                    <span className="mx-2 text-gray-300">|</span>
+                                    <button
+                                        onClick={() => navigate("/billing")}
+                                        className="text-primary-600 hover:text-primary-700 font-medium"
+                                    >
+                                        View in Billing →
+                                    </button>
+                                </p>
+                            </div>
+                            <div className="text-right">
+                                <p className="text-sm text-gray-500">Total Outstanding</p>
+                                <p className="text-2xl font-extrabold text-rose-600">${agingData.totals.totalBalance.toLocaleString()}</p>
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+                            <div className="bg-emerald-50 rounded-xl p-3 border border-emerald-200">
+                                <p className="text-[10px] font-semibold text-emerald-600 uppercase mb-1">0–30 Days</p>
+                                <p className="text-lg font-bold text-emerald-700">${agingData.totals.current.toLocaleString()}</p>
+                            </div>
+                            <div className="bg-amber-50 rounded-xl p-3 border border-amber-200">
+                                <p className="text-[10px] font-semibold text-amber-600 uppercase mb-1">31–60 Days</p>
+                                <p className="text-lg font-bold text-amber-700">${agingData.totals.days31to60.toLocaleString()}</p>
+                            </div>
+                            <div className="bg-orange-50 rounded-xl p-3 border border-orange-200">
+                                <p className="text-[10px] font-semibold text-orange-600 uppercase mb-1">61–90 Days</p>
+                                <p className="text-lg font-bold text-orange-700">${agingData.totals.days61to90.toLocaleString()}</p>
+                            </div>
+                            <div className="bg-rose-50 rounded-xl p-3 border border-rose-200">
+                                <p className="text-[10px] font-semibold text-rose-600 uppercase mb-1">90+ Days</p>
+                                <p className="text-lg font-bold text-rose-700">${agingData.totals.over90.toLocaleString()}</p>
+                            </div>
+                        </div>
+                        {/* Top Overdue Patients mini list */}
+                        {agingData.patients.slice(0, 5).some((p: any) => p.buckets.days31to60 > 0 || p.buckets.days61to90 > 0 || p.buckets.over90 > 0) && (
+                            <div>
+                                <h3 className="text-sm font-bold text-gray-700 mb-2 flex items-center gap-2">
+                                    ⚠️ Top Overdue Patients
+                                </h3>
+                                <div className="space-y-2">
+                                    {agingData.patients
+                                        .filter((p: any) => p.buckets.days31to60 > 0 || p.buckets.days61to90 > 0 || p.buckets.over90 > 0)
+                                        .slice(0, 5)
+                                        .map((patient: any) => (
+                                            <div
+                                                key={patient.patientId}
+                                                onClick={() => navigate(`/patient/${patient.patientId}`)}
+                                                className="flex items-center justify-between p-3 rounded-xl border border-gray-100 hover:border-primary-200 hover:bg-gray-50 transition cursor-pointer"
+                                            >
+                                                <div className="flex items-center gap-3">
+                                                    <div className={`w-2 h-8 rounded-full ${
+                                                        patient.buckets.over90 > 0 ? 'bg-rose-500' :
+                                                        patient.buckets.days61to90 > 0 ? 'bg-orange-500' :
+                                                        patient.buckets.days31to60 > 0 ? 'bg-amber-500' :
+                                                        'bg-emerald-500'
+                                                    }`}></div>
+                                                    <div>
+                                                        <p className="font-semibold text-gray-800 text-sm">{patient.patientName}</p>
+                                                        <p className="text-xs text-gray-500">
+                                                            Oldest: {patient.oldestUnpaidDate
+                                                                ? new Date(patient.oldestUnpaidDate).toLocaleDateString()
+                                                                : '—'}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <div className="text-right">
+                                                    <p className="font-bold text-rose-600 text-sm">${patient.totalBalance.toLocaleString()}</p>
+                                                    {patient.buckets.over90 > 0 && (
+                                                        <p className="text-xs text-rose-500">${patient.buckets.over90.toLocaleString()} 90+ days</p>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))}
+                                </div>
+                            </div>
+                        )}
                     </div>
                 )}
 

@@ -248,6 +248,13 @@ export default function Reports() {
         queryFn: () => api.reports.ownerSummary(from, to, groupBy),
     });
 
+    // ── Aging data (Phase 6D2) ─
+    const { data: agingData, isLoading: agingLoading, isError: agingError } = useQuery({
+        queryKey: ["ledger", "aging"],
+        queryFn: () => api.ledger.aging(),
+        refetchInterval: 60000,
+    });
+
     // ── Prescription tab state ─
     const [rxStart, setRxStart] = useState(isoNDaysAgo(30));
     const [rxEnd, setRxEnd] = useState(todayIso());
@@ -538,6 +545,117 @@ th { background: #f9fafb; font-weight: 600; color: #374151; }
                                 <Kpi icon="🏥" label="Visits" value={String(owner.totals.visitCount)} accent="bg-amber-50 text-amber-600" />
                                 <Kpi icon="🎟" label="Avg Ticket" value={fmtCurrency(owner.totals.averageTicket)} accent="bg-teal-50 text-teal-600" />
                             </div>
+
+                            {/* ── Aging / Receivables (Phase 6D2) ─ */}
+                            {agingLoading ? (
+                                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                                    <div className="flex items-center gap-3 text-gray-500">
+                                        <div className="animate-spin h-5 w-5 border-b-2 border-gray-600"></div>
+                                        <span>Loading aging data...</span>
+                                    </div>
+                                </div>
+                            ) : agingError ? (
+                                <div className="bg-white rounded-2xl shadow-sm border border-red-200 p-6 text-red-600">
+                                    Unable to load aging data.
+                                </div>
+                            ) : agingData && agingData.patients.length > 0 && (
+                                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+                                        <div>
+                                            <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                                                ⏰ Aging / Receivables
+                                            </h2>
+                                            <p className="text-sm text-gray-500">
+                                                {agingData.totals.patientCount} patients · {agingData.totals.overduePatientCount} overdue
+                                                <span className="mx-2 text-gray-300">|</span>
+                                                <button
+                                                    onClick={() => window.location.href = "/billing"}
+                                                    className="text-primary-600 hover:text-primary-700 font-medium"
+                                                >
+                                                    Full aging table →
+                                                </button>
+                                            </p>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="text-sm text-gray-500">Total Outstanding</p>
+                                            <p className="text-2xl font-extrabold text-rose-600">${agingData.totals.totalBalance.toLocaleString()}</p>
+                                        </div>
+                                    </div>
+
+                                    {/* Bucket summary bars */}
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                                        <div className="bg-emerald-50 rounded-xl p-4 border border-emerald-200">
+                                            <p className="text-xs font-semibold text-emerald-600 uppercase mb-1">0–30 Days</p>
+                                            <p className="text-xl font-bold text-emerald-700">${agingData.totals.current.toLocaleString()}</p>
+                                        </div>
+                                        <div className="bg-amber-50 rounded-xl p-4 border border-amber-200">
+                                            <p className="text-xs font-semibold text-amber-600 uppercase mb-1">31–60 Days</p>
+                                            <p className="text-xl font-bold text-amber-700">${agingData.totals.days31to60.toLocaleString()}</p>
+                                        </div>
+                                        <div className="bg-orange-50 rounded-xl p-4 border border-orange-200">
+                                            <p className="text-xs font-semibold text-orange-600 uppercase mb-1">61–90 Days</p>
+                                            <p className="text-xl font-bold text-orange-700">${agingData.totals.days61to90.toLocaleString()}</p>
+                                        </div>
+                                        <div className="bg-rose-50 rounded-xl p-4 border border-rose-200">
+                                            <p className="text-xs font-semibold text-rose-600 uppercase mb-1">90+ Days</p>
+                                            <p className="text-xl font-bold text-rose-700">${agingData.totals.over90.toLocaleString()}</p>
+                                        </div>
+                                    </div>
+
+                                    {/* Top Overdue Patients table */}
+                                    <div>
+                                        <h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
+                                            ⚠️ Top Overdue Patients
+                                        </h3>
+                                        <div className="overflow-x-auto">
+                                            <table className="w-full text-left">
+                                                <thead className="bg-gray-50 border-b border-gray-200">
+                                                    <tr>
+                                                        <th className="py-3 px-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Patient</th>
+                                                        <th className="py-3 px-4 text-right text-xs font-bold text-gray-600 uppercase tracking-wider">Total Balance</th>
+                                                        <th className="py-3 px-4 text-right text-xs font-bold text-gray-600 uppercase tracking-wider">0–30</th>
+                                                        <th className="py-3 px-4 text-right text-xs font-bold text-gray-600 uppercase tracking-wider">31–60</th>
+                                                        <th className="py-3 px-4 text-right text-xs font-bold text-gray-600 uppercase tracking-wider">61–90</th>
+                                                        <th className="py-3 px-4 text-right text-xs font-bold text-gray-600 uppercase tracking-wider">90+</th>
+                                                        <th className="py-3 px-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Oldest Unpaid</th>
+                                                        <th className="py-3 px-4 text-left text-xs font-bold text-gray-600 uppercase tracking-wider">Last Payment</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {agingData.patients.slice(0, 10).map((patient: any) => (
+                                                        <tr
+                                                            key={patient.patientId}
+                                                            className="border-b border-gray-100 hover:bg-gray-50 transition cursor-pointer"
+                                                            onClick={() => window.location.href = `/patient/${patient.patientId}`}
+                                                        >
+                                                            <td className="py-3 px-4 font-semibold text-gray-800">{patient.patientName}</td>
+                                                            <td className="py-3 px-4 text-right font-bold text-rose-600">${patient.totalBalance.toLocaleString()}</td>
+                                                            <td className="py-3 px-4 text-right text-emerald-600">
+                                                                {patient.buckets.current > 0 ? `$${patient.buckets.current.toLocaleString()}` : '—'}
+                                                            </td>
+                                                            <td className="py-3 px-4 text-right text-amber-600">
+                                                                {patient.buckets.days31to60 > 0 ? `$${patient.buckets.days31to60.toLocaleString()}` : '—'}
+                                                            </td>
+                                                            <td className="py-3 px-4 text-right text-orange-600">
+                                                                {patient.buckets.days61to90 > 0 ? `$${patient.buckets.days61to90.toLocaleString()}` : '—'}
+                                                            </td>
+                                                            <td className={`py-3 px-4 text-right font-medium ${patient.buckets.over90 > 0 ? 'text-rose-600 bg-rose-50' : ''}`}>
+                                                                {patient.buckets.over90 > 0 ? `$${patient.buckets.over90.toLocaleString()}` : '—'}
+                                                            </td>
+                                                            <td className="py-3 px-4 text-sm text-gray-500">
+                                                                {patient.oldestUnpaidDate ? new Date(patient.oldestUnpaidDate).toLocaleDateString() : '—'}
+                                                            </td>
+                                                            <td className="py-3 px-4 text-sm text-gray-500">
+                                                                {patient.lastPaymentDate ? new Date(patient.lastPaymentDate).toLocaleDateString() : '—'}
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
 
                             {/* Revenue Trend */}
                             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
