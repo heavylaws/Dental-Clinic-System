@@ -1738,6 +1738,11 @@ function AccountLedger({ patientId }: { patientId: string }) {
     const [statementTo, setStatementTo] = useState("");
     const [statementData, setStatementData] = useState<any>(null);
     const [statementLoading, setStatementLoading] = useState(false);
+    const [shareLoading, setShareLoading] = useState<string | null>(null);
+    const [shareResult, setShareResult] = useState<{ status: string; message: string; waUrl?: string } | null>(null);
+    const [showShareLogs, setShowShareLogs] = useState(false);
+
+    const queryClient = useQueryClient();
 
     const { data: ledger, isLoading, isError } = useQuery({
         queryKey: ["ledger", "patient", patientId],
@@ -2108,6 +2113,153 @@ function AccountLedger({ patientId }: { patientId: string }) {
                                 )}
                             </div>
 
+                            {/* Share Controls */}
+                            {statementData && (
+                                <div className="flex items-center gap-4 bg-emerald-50 p-4 rounded-lg border border-emerald-200">
+                                    <span className="text-sm font-semibold text-emerald-700">Share Statement:</span>
+                                    <button
+                                        onClick={async () => {
+                                            setShareLoading("whatsapp");
+                                            setShareResult(null);
+                                            try {
+                                                const result = await api.ledger.shareStatement(patientId, {
+                                                    from: statementFrom || undefined,
+                                                    to: statementTo || undefined,
+                                                    channel: "whatsapp",
+                                                });
+                                                setShareResult({
+                                                    status: result.status,
+                                                    message: result.message,
+                                                    waUrl: result.waUrl,
+                                                });
+                                            } catch (e: any) {
+                                                setShareResult({
+                                                    status: "failed",
+                                                    message: e?.message || "Failed to share statement",
+                                                });
+                                            } finally {
+                                                setShareLoading(null);
+                                                // Refresh share logs
+                                                queryClient.invalidateQueries({ queryKey: ["statement-share-logs", patientId] });
+                                            }
+                                        }}
+                                        disabled={shareLoading === "whatsapp"}
+                                        className="px-4 py-2 bg-emerald-600 text-white text-sm font-semibold rounded-lg hover:bg-emerald-700 transition disabled:opacity-50 flex items-center gap-2"
+                                    >
+                                        {shareLoading === "whatsapp" ? (
+                                            <>
+                                                <span className="animate-spin inline-block">⏳</span> Sending...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <span>📱</span> WhatsApp
+                                            </>
+                                        )}
+                                    </button>
+                                    <button
+                                        onClick={async () => {
+                                            setShareLoading("email");
+                                            setShareResult(null);
+                                            try {
+                                                const result = await api.ledger.shareStatement(patientId, {
+                                                    from: statementFrom || undefined,
+                                                    to: statementTo || undefined,
+                                                    channel: "email",
+                                                });
+                                                setShareResult({
+                                                    status: result.status,
+                                                    message: result.message,
+                                                });
+                                            } catch (e: any) {
+                                                setShareResult({
+                                                    status: "failed",
+                                                    message: e?.message || "Failed to share statement",
+                                                });
+                                            } finally {
+                                                setShareLoading(null);
+                                                queryClient.invalidateQueries({ queryKey: ["statement-share-logs", patientId] });
+                                            }
+                                        }}
+                                        disabled={shareLoading === "email"}
+                                        className="px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition disabled:opacity-50 flex items-center gap-2"
+                                    >
+                                        {shareLoading === "email" ? (
+                                            <>
+                                                <span className="animate-spin inline-block">⏳</span> Sending...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <span>✉️</span> Email
+                                            </>
+                                        )}
+                                    </button>
+                                    <button
+                                        onClick={() => setShowShareLogs(!showShareLogs)}
+                                        className="px-3 py-2 text-sm text-gray-600 hover:text-gray-800 underline"
+                                    >
+                                        {showShareLogs ? "Hide History" : "View History"}
+                                    </button>
+                                </div>
+                            )}
+
+                            {/* Share Result */}
+                            {shareResult && (
+                                <div className={`p-4 rounded-lg ${
+                                    shareResult.status === "sent"
+                                        ? "bg-emerald-50 border border-emerald-200"
+                                        : shareResult.status === "stubbed"
+                                        ? "bg-amber-50 border border-amber-200"
+                                        : shareResult.status === "not_configured"
+                                        ? "bg-gray-50 border border-gray-200"
+                                        : "bg-rose-50 border border-rose-200"
+                                }`}>
+                                    <div className="flex items-start gap-3">
+                                        <span className="text-xl">
+                                            {shareResult.status === "sent"
+                                                ? "✅"
+                                                : shareResult.status === "stubbed"
+                                                ? "⚠️"
+                                                : shareResult.status === "not_configured"
+                                                ? "⚙️"
+                                                : "❌"}
+                                        </span>
+                                        <div className="flex-1">
+                                            <p className={`font-semibold ${
+                                                shareResult.status === "sent"
+                                                    ? "text-emerald-700"
+                                                    : shareResult.status === "stubbed"
+                                                    ? "text-amber-700"
+                                                    : shareResult.status === "not_configured"
+                                                    ? "text-gray-700"
+                                                    : "text-rose-700"
+                                            }`}>
+                                                {shareResult.status === "sent"
+                                                    ? "Statement Shared"
+                                                    : shareResult.status === "stubbed"
+                                                    ? "WhatsApp Link Prepared"
+                                                    : shareResult.status === "not_configured"
+                                                    ? "Email Not Configured"
+                                                    : "Sharing Failed"}
+                                            </p>
+                                            <p className="text-sm text-gray-600 mt-1">{shareResult.message}</p>
+                                            {shareResult.waUrl && (
+                                                <a
+                                                    href={shareResult.waUrl}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="inline-block mt-3 px-4 py-2 bg-emerald-600 text-white text-sm font-semibold rounded-lg hover:bg-emerald-700 transition"
+                                                >
+                                                    📱 Open WhatsApp to Send
+                                                </a>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Share Logs */}
+                            {showShareLogs && <StatementShareLogs patientId={patientId} />}
+
                             {/* Statement Display */}
                             {statementData && (
                                 <div className="space-y-6">
@@ -2234,6 +2386,94 @@ function AccountLedger({ patientId }: { patientId: string }) {
                     </div>
                 </div>
             )}
+        </div>
+    );
+}
+
+// ─── Statement Share Logs Component (Phase 6C2) ───────────────────────
+
+function StatementShareLogs({ patientId }: { patientId: string }) {
+    const { data, isLoading, isError } = useQuery({
+        queryKey: ["statement-share-logs", patientId],
+        queryFn: () => api.ledger.statementShareLogs(patientId),
+    });
+
+    if (isLoading) {
+        return (
+            <div className="bg-gray-50 p-4 rounded-lg text-center">
+                <div className="animate-spin inline-block h-5 w-5 border-b-2 border-gray-600"></div>
+                <span className="ml-2 text-sm text-gray-500">Loading share history...</span>
+            </div>
+        );
+    }
+
+    if (isError) {
+        return (
+            <div className="bg-rose-50 p-4 rounded-lg text-sm text-rose-600">
+                Unable to load share history.
+            </div>
+        );
+    }
+
+    const logs = data?.logs || [];
+
+    if (logs.length === 0) {
+        return (
+            <div className="bg-gray-50 p-4 rounded-lg text-sm text-gray-500 text-center">
+                No share history yet.
+            </div>
+        );
+    }
+
+    return (
+        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+            <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
+                <h4 className="font-semibold text-gray-700">Share History</h4>
+            </div>
+            <table className="w-full text-left">
+                <thead className="bg-gray-50">
+                    <tr>
+                        <th className="px-4 py-2 text-xs font-semibold text-gray-600">Date</th>
+                        <th className="px-4 py-2 text-xs font-semibold text-gray-600">Channel</th>
+                        <th className="px-4 py-2 text-xs font-semibold text-gray-600">Status</th>
+                        <th className="px-4 py-2 text-xs font-semibold text-gray-600 text-right">Balance</th>
+                        <th className="px-4 py-2 text-xs font-semibold text-gray-600">Details</th>
+                    </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                    {logs.map((log: any) => (
+                        <tr key={log.id} className="hover:bg-gray-50">
+                            <td className="px-4 py-2 text-sm text-gray-600">
+                                {new Date(log.createdAt).toLocaleString()}
+                            </td>
+                            <td className="px-4 py-2">
+                                <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium
+                                    ${log.channel === 'whatsapp' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
+                                    {log.channel === 'whatsapp' ? '📱 WhatsApp' : '✉️ Email'}
+                                </span>
+                            </td>
+                            <td className="px-4 py-2">
+                                <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium
+                                    ${log.status === 'sent' ? 'bg-emerald-100 text-emerald-700' :
+                                        log.status === 'stubbed' ? 'bg-amber-100 text-amber-700' :
+                                            log.status === 'not_configured' ? 'bg-gray-100 text-gray-600' :
+                                                'bg-rose-100 text-rose-700'}`}>
+                                    {log.status === 'sent' ? '✅ Sent' :
+                                        log.status === 'stubbed' ? '⚠️ Stubbed' :
+                                            log.status === 'not_configured' ? '⚙️ Not Configured' :
+                                                '❌ Failed'}
+                                </span>
+                            </td>
+                            <td className="px-4 py-2 text-sm text-right font-medium">
+                                ${log.closingBalance.toLocaleString()}
+                            </td>
+                            <td className="px-4 py-2 text-sm text-gray-500">
+                                {log.error || (log.from && log.to ? `${log.from} to ${log.to}` : 'Full history')}
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
         </div>
     );
 }

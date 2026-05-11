@@ -1548,6 +1548,143 @@ Generate professional patient account statements from existing ledger (6A) and p
 
 ---
 
+## Phase 6C2 — WhatsApp/Email Statement Sharing
+
+**Status:** ✅ COMPLETE
+
+### Goal
+
+Allow staff to share or send patient account statements via WhatsApp or email. Truthfully report delivery status (sent vs stubbed vs not_configured vs failed).
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `server/modules/ledger/index.ts` | Added `POST /patient/:patientId/statement/share` and `GET /patient/:patientId/statement/share-logs` endpoints with WhatsApp integration, email stub, and in-memory share logging |
+| `client/src/lib/api.ts` | Added `api.ledger.shareStatement()` and `api.ledger.statementShareLogs()` methods |
+| `client/src/pages/PatientFile.tsx` | Added share buttons (WhatsApp/Email), share result display, and share history table to statement modal |
+| `PRODUCT_PHASES.md` | This entry |
+
+### Statement Share Endpoint
+
+**`POST /api/ledger/patient/:patientId/statement/share`**
+
+**Request Body:**
+```json
+{
+  "from": "2026-01-01",
+  "to": "2026-05-31",
+  "channel": "whatsapp" | "email",
+  "message": "Optional custom message"
+}
+```
+
+**Response:**
+```json
+{
+  "success": boolean,
+  "status": "sent" | "stubbed" | "not_configured" | "failed",
+  "channel": "whatsapp" | "email",
+  "message": "Human-readable status description",
+  "waUrl": "https://wa.me/1234567890?text=...", // If stubbed
+  "log": { /* StatementShareLog */ }
+}
+```
+
+### WhatsApp Behavior
+
+**Connected (ready):**
+- Sends statement summary text via `sendWhatsApp()` helper
+- Returns `status: "sent"` if delivery confirmed
+
+**Disconnected (not ready):**
+- Returns `status: "stubbed"`
+- Generates `wa.me` URL with pre-filled message
+- Returns `waUrl` for user to open manually
+- Does NOT claim delivery
+
+**Missing Patient Phone:**
+- Returns HTTP 400
+- `status: "failed"`
+- Clear message: "Patient has no phone number on file"
+
+### Email Behavior
+
+**Not Configured:**
+- Returns `status: "not_configured"`
+- Message: "Email sending is not configured. Please contact the administrator to set up SMTP."
+- Does NOT fake sending
+
+**Missing Patient Email:**
+- Returns HTTP 400
+- `status: "failed"`
+- Clear message: "Patient has no email address on file"
+
+### Statement Message Format
+
+**Auto-generated message includes:**
+- Clinic name (hardcoded as "Dental Clinic")
+- Patient name and statement period
+- Opening balance, total charges, total payments
+- Closing balance (bold)
+- Active payment plans summary (paid/remaining, next due, overdue count)
+- Closing note: "Please contact the clinic for details."
+
+### Share Log Behavior
+
+**In-memory logging (`demoStatementShareLogs`):**
+- Every share attempt logged regardless of outcome
+- Fields: id, patientId, patientName, channel, status, from/to dates, closingBalance, message, error, createdAt
+- Logs reset on server restart (demo limitation)
+
+**Share Log Endpoint:**
+- `GET /api/ledger/patient/:patientId/statement/share-logs`
+- Returns patient's share history sorted newest first
+
+### Desktop UI Summary
+
+**Statement Modal → Share Controls (appears after generation):**
+- WhatsApp button (green) with loading spinner
+- Email button (blue) with loading spinner
+- View History toggle link
+
+**Share Result Display:**
+- **Sent:** Green banner with ✅
+- **Stubbed:** Amber banner with ⚠️ + "Open WhatsApp to Send" button
+- **Not Configured:** Gray banner with ⚙️
+- **Failed:** Red banner with ❌
+
+**Share History Table:**
+- Date, channel badge, status badge, closing balance, details
+- Shows all past share attempts for the patient
+
+### Mobile Decision
+
+**No mobile changes.**
+
+- Mobile statement sharing deferred
+- Mobile billing continues unchanged
+
+### Build Results
+
+| Command | Result |
+|---------|--------|
+| `npx tsc --noEmit` | ✅ exit 0 |
+| `npx vite build` | ✅ no errors |
+| `npx tsc -p tsconfig.server.json` | ✅ exit 0 |
+
+### Known Limitations
+
+- **Browser print/PDF remains client-side** — no server PDF generator
+- **WhatsApp PDF attachment not implemented** — text-only messages
+- **Email is not_configured** — no SMTP configured in this system
+- **Share logs are in-memory only** — reset on server restart
+- **Mobile sharing UI deferred** — desktop PatientFile only
+- **Aging buckets deferred** to Phase 6D
+- **Clinic name hardcoded** as "Dental Clinic" in messages
+
+---
+
 ## Future Phases (Not Yet Defined)
 
 To be filled in by product owner.

@@ -696,6 +696,57 @@ export const api = {
                 }>;
             }>(`/ledger/patient/${patientId}/statement${qs ? `?${qs}` : ""}`);
         },
+        shareStatement: (
+            patientId: string,
+            payload: {
+                from?: string;
+                to?: string;
+                channel: "whatsapp" | "email";
+                message?: string;
+            }
+        ) =>
+            request<{
+                success: boolean;
+                status: "sent" | "stubbed" | "not_configured" | "failed";
+                channel: "whatsapp" | "email";
+                message: string;
+                waUrl?: string;
+                log?: {
+                    id: string;
+                    patientId: string;
+                    patientName: string;
+                    channel: "whatsapp" | "email";
+                    status: "sent" | "stubbed" | "not_configured" | "failed";
+                    from?: string;
+                    to?: string;
+                    closingBalance: number;
+                    message: string;
+                    error?: string;
+                    createdAt: string;
+                };
+            }>(`/ledger/patient/${patientId}/statement/share`, {
+                method: "POST",
+                body: JSON.stringify(payload),
+            }),
+        statementShareLogs: (patientId: string) =>
+            request<{
+                patientId: string;
+                patientName: string;
+                logs: Array<{
+                    id: string;
+                    patientId: string;
+                    patientName: string;
+                    channel: "whatsapp" | "email";
+                    status: "sent" | "stubbed" | "not_configured" | "failed";
+                    from?: string;
+                    to?: string;
+                    closingBalance: number;
+                    message: string;
+                    error?: string;
+                    createdAt: string;
+                }>;
+                count: number;
+            }>(`/ledger/patient/${patientId}/statement/share-logs`),
     },
 
     // ─── Payment Plans (Phase 6B) ─────────────────────────────────────

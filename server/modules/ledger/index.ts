@@ -413,55 +413,48 @@ interface PatientStatement {
     paymentPlans: StatementPaymentPlanSummary[];
 }
 
-// GET /api/ledger/patient/:patientId/statement - Get patient account statement
-router.get("/patient/:patientId/statement", async (req, res) => {
-    const { patientId } = req.params;
-    const { from, to } = req.query;
-
-    // Validate patient exists
+async function computePatientStatementData(
+    patientId: string,
+    from?: string,
+    to?: string
+): Promise<{ ok: true; statement: PatientStatement } | { ok: false; status: number; error: string }> {
     const patient = demoPatients.find((p) => p.id === patientId);
     if (!patient) {
-        return res.status(404).json({ error: "Patient not found" });
+        return { ok: false, status: 404, error: "Patient not found" };
     }
 
-    // Parse and validate dates
     const now = new Date();
     let fromDate: Date | null = null;
     let toDate: Date | null = null;
 
-    if (from && typeof from === "string") {
+    if (from !== undefined) {
         const parsedFrom = parseDateOnly(from);
         if (!parsedFrom) {
-            return res.status(400).json({ error: "Invalid from date" });
+            return { ok: false, status: 400, error: "Invalid from date" };
         }
         parsedFrom.setUTCHours(0, 0, 0, 0);
         fromDate = parsedFrom;
     }
 
-    if (to && typeof to === "string") {
+    if (to !== undefined) {
         const parsedTo = parseDateOnly(to);
         if (!parsedTo) {
-            return res.status(400).json({ error: "Invalid to date" });
+            return { ok: false, status: 400, error: "Invalid to date" };
         }
-        // Set to end of day (UTC) for inclusive filtering.
         parsedTo.setUTCHours(23, 59, 59, 999);
         toDate = parsedTo;
     }
 
     if (fromDate && toDate && fromDate > toDate) {
-        return res.status(400).json({ error: "'from' date cannot be after 'to' date" });
+        return { ok: false, status: 400, error: "'from' date cannot be after 'to' date" };
     }
 
-    // Get all ledger entries
     const allEntries = computeLedgerEntries(patientId);
-
-    // Determine date range
     const earliestEntry = allEntries.length > 0 ? allEntries[0] : null;
 
     const effectiveFromDate = fromDate || (earliestEntry ? new Date(earliestEntry.date) : new Date("2000-01-01"));
     const effectiveToDate = toDate || now;
 
-    // Calculate opening balance (balance before from date)
     let openingBalance = 0;
     for (const entry of allEntries) {
         const entryDate = new Date(entry.date);
@@ -471,7 +464,6 @@ router.get("/patient/:patientId/statement", async (req, res) => {
     }
     openingBalance = roundToTwoDecimals(openingBalance);
 
-    // Filter entries within date range
     const statementEntries: StatementEntry[] = [];
     let totalCharges = 0;
     let totalPayments = 0;
@@ -481,8 +473,6 @@ router.get("/patient/:patientId/statement", async (req, res) => {
         const entryDate = new Date(entry.date);
         if (entryDate >= effectiveFromDate && entryDate <= effectiveToDate) {
             statementEntries.push(entry);
-
-            // Categorize amounts
             if (entry.type === "charge") {
                 totalCharges += entry.debit;
             } else if (entry.type === "payment") {
@@ -497,7 +487,6 @@ router.get("/patient/:patientId/statement", async (req, res) => {
     totalPayments = roundToTwoDecimals(totalPayments);
     totalAdjustments = roundToTwoDecimals(totalAdjustments);
 
-    // Calculate closing balance. Prefer ledger running balance for exact reconciliation when entries exist.
     const rangeDelta = roundToTwoDecimals(totalCharges - totalPayments + totalAdjustments);
     const computedClosing = roundToTwoDecimals(openingBalance + rangeDelta);
     const lastEntryBalance =
@@ -506,8 +495,6 @@ router.get("/patient/:patientId/statement", async (req, res) => {
             : null;
     const closingBalance = lastEntryBalance ?? computedClosing;
 
-    // Get payment plan summaries
-    // Import payment plan data dynamically to avoid circular dependency
     let paymentPlanSummaries: StatementPaymentPlanSummary[] = [];
     try {
         const paymentPlanModule = await import("../paymentPlan/index.js");
@@ -516,32 +503,369 @@ router.get("/patient/:patientId/statement", async (req, res) => {
             paymentPlanSummaries = getPatientPaymentPlanSummaries(patientId);
         }
     } catch {
-        // Payment plans module not available or no data
         paymentPlanSummaries = [];
     }
 
-    const statement: PatientStatement = {
-        patient: {
-            id: patient.id,
-            name: `${patient.firstName} ${patient.lastName}`,
-            phone: patient.phone || null,
-            email: patient.email || null,
-        },
+    return {
+        ok: true,
         statement: {
-            from: effectiveFromDate.toISOString().split("T")[0],
-            to: effectiveToDate.toISOString().split("T")[0],
-            generatedAt: now.toISOString(),
-            openingBalance: Number.isFinite(openingBalance) ? openingBalance : 0,
-            totalCharges: Number.isFinite(totalCharges) ? totalCharges : 0,
-            totalPayments: Number.isFinite(totalPayments) ? totalPayments : 0,
-            totalAdjustments: Number.isFinite(totalAdjustments) ? totalAdjustments : 0,
-            closingBalance: Number.isFinite(closingBalance) ? closingBalance : 0,
+            patient: {
+                id: patient.id,
+                name: `${patient.firstName} ${patient.lastName}`,
+                phone: patient.phone || null,
+                email: patient.email || null,
+            },
+            statement: {
+                from: effectiveFromDate.toISOString().split("T")[0],
+                to: effectiveToDate.toISOString().split("T")[0],
+                generatedAt: now.toISOString(),
+                openingBalance: Number.isFinite(openingBalance) ? openingBalance : 0,
+                totalCharges: Number.isFinite(totalCharges) ? totalCharges : 0,
+                totalPayments: Number.isFinite(totalPayments) ? totalPayments : 0,
+                totalAdjustments: Number.isFinite(totalAdjustments) ? totalAdjustments : 0,
+                closingBalance: Number.isFinite(closingBalance) ? closingBalance : 0,
+            },
+            entries: statementEntries,
+            paymentPlans: paymentPlanSummaries,
         },
-        entries: statementEntries,
-        paymentPlans: paymentPlanSummaries,
+    };
+}
+
+// GET /api/ledger/patient/:patientId/statement - Get patient account statement
+router.get("/patient/:patientId/statement", async (req, res) => {
+    const { patientId } = req.params;
+    const { from, to } = req.query;
+
+    const computed = await computePatientStatementData(
+        patientId,
+        typeof from === "string" ? from : undefined,
+        typeof to === "string" ? to : undefined
+    );
+
+    if (!computed.ok) {
+        return res.status(computed.status).json({ error: computed.error });
+    }
+
+    res.json(computed.statement);
+});
+
+// ─── Statement Share (Phase 6C2) ──────────────────────────────────────────
+
+interface StatementShareLog {
+    id: string;
+    patientId: string;
+    patientName: string;
+    channel: "whatsapp" | "email";
+    status: "sent" | "stubbed" | "not_configured" | "failed";
+    from?: string;
+    to?: string;
+    closingBalance: number;
+    message: string;
+    error?: string;
+    createdAt: string;
+}
+
+// In-memory share logs for demo (resets on server restart)
+const demoStatementShareLogs: StatementShareLog[] = [];
+
+// POST /api/ledger/patient/:patientId/statement/share - Share statement
+router.post("/patient/:patientId/statement/share", async (req, res) => {
+    const { patientId } = req.params;
+    const { from, to, channel, message: customMessage } = req.body as {
+        from?: string;
+        to?: string;
+        channel: "whatsapp" | "email";
+        message?: string;
     };
 
-    res.json(statement);
+    // Validate channel
+    if (channel !== "whatsapp" && channel !== "email") {
+        return res.status(400).json({ error: "Channel must be 'whatsapp' or 'email'" });
+    }
+
+    const computed = await computePatientStatementData(patientId, from, to);
+    if (!computed.ok) {
+        return res.status(computed.status).json({ error: computed.error });
+    }
+    const statementData = computed.statement;
+
+    const patientPhone = statementData.patient.phone || null;
+    const patientEmail = statementData.patient.email || null;
+
+    const { statement, paymentPlans } = statementData;
+    const patientName = statementData.patient.name;
+    const effectiveFrom = statement.from;
+    const effectiveTo = statement.to;
+    const periodText = `${effectiveFrom} to ${effectiveTo}`;
+
+    // Build message
+    let shareMessage = customMessage || "";
+    if (!shareMessage) {
+        shareMessage =
+            `*Dental Clinic - Account Statement*\n\n` +
+            `Patient: ${patientName}\n` +
+            `Period: ${periodText}\n\n` +
+            `*Summary:*\n` +
+            `Opening Balance: $${statement.openingBalance.toLocaleString()}\n` +
+            `Total Charges: +$${statement.totalCharges.toLocaleString()}\n` +
+            `Total Payments: -$${statement.totalPayments.toLocaleString()}\n`;
+        if (statement.totalAdjustments !== 0) {
+            shareMessage += `Adjustments: $${statement.totalAdjustments.toLocaleString()}\n`;
+        }
+        shareMessage += `*Closing Balance: $${statement.closingBalance.toLocaleString()}*\n`;
+
+        // Add payment plan summary if available
+        const activePlans = paymentPlans.filter((p) => p.status === "active");
+        if (activePlans.length > 0) {
+            shareMessage += `\n*Active Payment Plans:*\n`;
+            for (const plan of activePlans) {
+                shareMessage += `• ${plan.title}: Paid $${plan.paidAmount.toLocaleString()} / $${plan.totalAmount.toLocaleString()}`;
+                if (plan.remainingAmount > 0) {
+                    shareMessage += ` (Remaining: $${plan.remainingAmount.toLocaleString()}`;
+                    if (plan.overdueCount > 0) {
+                        shareMessage += `, ${plan.overdueCount} overdue`;
+                    }
+                    shareMessage += `)`;
+                }
+                shareMessage += `\n`;
+                if (plan.nextDueDate) {
+                    shareMessage += `  Next due: ${new Date(plan.nextDueDate).toLocaleDateString()}\n`;
+                }
+            }
+        }
+
+        shareMessage += `\nPlease contact the clinic for details.`;
+    }
+
+    // Handle WhatsApp
+    if (channel === "whatsapp") {
+        if (!patientPhone) {
+            const log: StatementShareLog = {
+                id: uuidv4(),
+                patientId,
+                patientName,
+                channel: "whatsapp",
+                status: "failed",
+                from: effectiveFrom,
+                to: effectiveTo,
+                closingBalance: statement.closingBalance,
+                message: shareMessage,
+                error: "Patient has no phone number",
+                createdAt: new Date().toISOString(),
+            };
+            demoStatementShareLogs.push(log);
+            return res.status(400).json({
+                success: false,
+                status: "failed",
+                channel: "whatsapp",
+                message: "Patient has no phone number on file",
+                log,
+            });
+        }
+
+        const digits = patientPhone.replace(/\D/g, "");
+        if (digits.length < 7) {
+            const log: StatementShareLog = {
+                id: uuidv4(),
+                patientId,
+                patientName,
+                channel: "whatsapp",
+                status: "failed",
+                from: effectiveFrom,
+                to: effectiveTo,
+                closingBalance: statement.closingBalance,
+                message: shareMessage,
+                error: "Patient phone number is invalid",
+                createdAt: new Date().toISOString(),
+            };
+            demoStatementShareLogs.push(log);
+            return res.status(400).json({
+                success: false,
+                status: "failed",
+                channel: "whatsapp",
+                message: "Patient phone number is invalid",
+                log,
+            });
+        }
+
+        // Try to send via WhatsApp
+        try {
+            const { sendWhatsApp } = await import("../whatsapp/index.js");
+            const result = await sendWhatsApp(patientPhone, shareMessage);
+
+            if (result.ok) {
+                const log: StatementShareLog = {
+                    id: uuidv4(),
+                    patientId,
+                    patientName,
+                    channel: "whatsapp",
+                    status: "sent",
+                    from: effectiveFrom,
+                    to: effectiveTo,
+                    closingBalance: statement.closingBalance,
+                    message: shareMessage,
+                    createdAt: new Date().toISOString(),
+                };
+                demoStatementShareLogs.push(log);
+                return res.json({
+                    success: true,
+                    status: "sent",
+                    channel: "whatsapp",
+                    message: "Statement sent via WhatsApp",
+                    log,
+                });
+            } else {
+                // WhatsApp not connected - return stubbed with wa.me URL
+                if (result.error === "Invalid phone number") {
+                    const log: StatementShareLog = {
+                        id: uuidv4(),
+                        patientId,
+                        patientName,
+                        channel: "whatsapp",
+                        status: "failed",
+                        from: effectiveFrom,
+                        to: effectiveTo,
+                        closingBalance: statement.closingBalance,
+                        message: shareMessage,
+                        error: result.error,
+                        createdAt: new Date().toISOString(),
+                    };
+                    demoStatementShareLogs.push(log);
+                    return res.status(400).json({
+                        success: false,
+                        status: "failed",
+                        channel: "whatsapp",
+                        message: "Patient phone number is invalid",
+                        log,
+                    });
+                }
+
+                const waUrl = `https://wa.me/${digits}?text=${encodeURIComponent(shareMessage)}`;
+                const log: StatementShareLog = {
+                    id: uuidv4(),
+                    patientId,
+                    patientName,
+                    channel: "whatsapp",
+                    status: "stubbed",
+                    from: effectiveFrom,
+                    to: effectiveTo,
+                    closingBalance: statement.closingBalance,
+                    message: shareMessage,
+                    error: result.error,
+                    createdAt: new Date().toISOString(),
+                };
+                demoStatementShareLogs.push(log);
+                return res.json({
+                    success: true,
+                    status: "stubbed",
+                    channel: "whatsapp",
+                    message: "WhatsApp is not connected. Use the link to send manually.",
+                    waUrl,
+                    log,
+                });
+            }
+        } catch (e: any) {
+            // WhatsApp module error - return stubbed with wa.me URL
+            const waUrl = `https://wa.me/${digits}?text=${encodeURIComponent(shareMessage)}`;
+            const log: StatementShareLog = {
+                id: uuidv4(),
+                patientId,
+                patientName,
+                channel: "whatsapp",
+                status: "stubbed",
+                from: effectiveFrom,
+                to: effectiveTo,
+                closingBalance: statement.closingBalance,
+                message: shareMessage,
+                error: e.message,
+                createdAt: new Date().toISOString(),
+            };
+            demoStatementShareLogs.push(log);
+            return res.json({
+                success: true,
+                status: "stubbed",
+                channel: "whatsapp",
+                message: "WhatsApp service unavailable. Use the link to send manually.",
+                waUrl,
+                log,
+            });
+        }
+    }
+
+    // Handle Email
+    if (channel === "email") {
+        if (!patientEmail) {
+            const log: StatementShareLog = {
+                id: uuidv4(),
+                patientId,
+                patientName,
+                channel: "email",
+                status: "failed",
+                from: effectiveFrom,
+                to: effectiveTo,
+                closingBalance: statement.closingBalance,
+                message: shareMessage,
+                error: "Patient has no email address",
+                createdAt: new Date().toISOString(),
+            };
+            demoStatementShareLogs.push(log);
+            return res.status(400).json({
+                success: false,
+                status: "failed",
+                channel: "email",
+                message: "Patient has no email address on file",
+                log,
+            });
+        }
+
+        // Email not configured in this system
+        const log: StatementShareLog = {
+            id: uuidv4(),
+            patientId,
+            patientName,
+            channel: "email",
+            status: "not_configured",
+            from: effectiveFrom,
+            to: effectiveTo,
+            closingBalance: statement.closingBalance,
+            message: shareMessage,
+            error: "Email sending is not configured",
+            createdAt: new Date().toISOString(),
+        };
+        demoStatementShareLogs.push(log);
+        return res.json({
+            success: false,
+            status: "not_configured",
+            channel: "email",
+            message: "Email sending is not configured. Please contact the administrator to set up SMTP.",
+            log,
+        });
+    }
+
+    // Should not reach here
+    return res.status(400).json({ error: "Invalid channel" });
+});
+
+// GET /api/ledger/patient/:patientId/statement/share-logs - Get share history
+router.get("/patient/:patientId/statement/share-logs", (req, res) => {
+    const { patientId } = req.params;
+
+    // Validate patient exists
+    const patient = demoPatients.find((p) => p.id === patientId);
+    if (!patient) {
+        return res.status(404).json({ error: "Patient not found" });
+    }
+
+    const logs = demoStatementShareLogs
+        .filter((log) => log.patientId === patientId)
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    res.json({
+        patientId,
+        patientName: `${patient.firstName} ${patient.lastName}`,
+        logs,
+        count: logs.length,
+    });
 });
 
 export { router as ledgerRouter };
