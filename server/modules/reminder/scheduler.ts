@@ -26,6 +26,7 @@
 
 import { demoAppointments } from "../../demo-store.js";
 import { demoReminderLogs, sendAppointmentReminder } from "./core.js";
+import { getReminderSettings } from "./settings.js";
 
 // ─── Rule definitions ─────────────────────────────────────────────────────────
 
@@ -143,7 +144,8 @@ const state: SchedulerState = {
 };
 
 export function getSchedulerState(): SchedulerState {
-    return { ...state };
+    const settings = getReminderSettings();
+    return { ...state, enabled: state.enabled && settings.schedulerEnabled };
 }
 
 // ─── Idempotency check ────────────────────────────────────────────────────────
@@ -163,12 +165,17 @@ export async function runReminderSchedulerOnce(): Promise<SchedulerRunSummary> {
         return { checked: 0, sent: 0, skipped: 0, failed: 0, errors: ["Scheduler already running"] };
     }
 
+    // Phase 5C: respect app-level schedulerEnabled setting
+    const settings = getReminderSettings();
+    if (!settings.schedulerEnabled) {
+        return { checked: 0, sent: 0, skipped: 0, failed: 0, errors: ["Scheduler disabled via settings"] };
+    }
+
     state.running = true;
     state.lastRunAt = new Date().toISOString();
 
     const summary: SchedulerRunSummary = { checked: 0, sent: 0, skipped: 0, failed: 0, errors: [] };
     const now = new Date();
-    const channel = "whatsapp" as const;
 
     try {
         for (const appt of demoAppointments) {
@@ -179,6 +186,16 @@ export async function runReminderSchedulerOnce(): Promise<SchedulerRunSummary> {
 
             for (const rule of REMINDER_RULES) {
                 summary.checked++;
+
+                // Phase 5C: respect per-rule enabled flag
+                const ruleSettings = settings.rules[rule.key];
+                if (ruleSettings && !ruleSettings.enabled) {
+                    summary.skipped++;
+                    continue;
+                }
+
+                // Phase 5C: use per-rule channel (fallback to defaultChannel)
+                const channel = (ruleSettings?.channel ?? settings.defaultChannel) as "whatsapp" | "sms" | "email";
 
                 // Check if rule is due now
                 if (!rule.isDue(now, appt.appointmentDate, appt.timeSlot)) {

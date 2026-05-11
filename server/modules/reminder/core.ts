@@ -1,10 +1,11 @@
-// ─── Reminder Core — Phase 5A + 5B ───────────────────────────────────────────
+// ─── Reminder Core — Phase 5A + 5B + 5C ─────────────────────────────────────
 // Shared between the HTTP router (index.ts) and the scheduler (scheduler.ts).
 // Keeping this separate avoids a circular import between index ↔ scheduler.
 
 import { v4 as uuidv4 } from "uuid";
-import { demoAppointments, demoPatients, demoSettings } from "../../demo-store.js";
+import { demoAppointments, demoPatients } from "../../demo-store.js";
 import { sendWhatsApp } from "../whatsapp/index.js";
+import { getPatientPreferences, renderTemplate } from "./settings.js";
 
 // ─── ReminderLog type ─────────────────────────────────────────────────────────
 // Phase 5B additions: ruleKey, triggerType, dueAt (all optional for backward compat).
@@ -33,15 +34,6 @@ export interface ReminderLog {
 // TODO: replace with a real DB table via Drizzle migration in a later phase.
 
 export const demoReminderLogs: ReminderLog[] = [];
-
-// ─── Default message builder ──────────────────────────────────────────────────
-
-function buildReminderMessage(patientName: string, appointmentDate: string, timeSlot: string): string {
-    return (
-        `Hello ${patientName}, this is a reminder for your dental appointment on ` +
-        `${appointmentDate} at ${timeSlot}. Please contact us if you need to reschedule.`
-    );
-}
 
 // ─── Shared send function ─────────────────────────────────────────────────────
 // Single dispatch point for all reminder sends.
@@ -82,7 +74,66 @@ export async function sendAppointmentReminder(opts: SendReminderOptions): Promis
         : "Patient";
     const phone: string | null = patient?.phone || null;
 
-    const message = opts.message || buildReminderMessage(patientName, appt.appointmentDate, appt.timeSlot);
+    // ── Phase 5C: patient opt-out check ──
+    if (patient?.id) {
+        const prefs = getPatientPreferences(patient.id);
+        if (!prefs.remindersEnabled) {
+            const log: ReminderLog = {
+                id: uuidv4(),
+                appointmentId: opts.appointmentId,
+                patientId: patient.id,
+                patientName,
+                phone,
+                channel,
+                status: "not_configured",
+                message: "",
+                error: "Patient has opted out of reminders",
+                sentAt: new Date().toISOString(),
+                appointmentDate: appt.appointmentDate,
+                timeSlot: appt.timeSlot,
+                ruleKey,
+                triggerType,
+                dueAt,
+            };
+            demoReminderLogs.push(log);
+            return { success: false, message: "Patient has opted out of reminders.", log, httpStatus: 200 };
+        }
+
+        if (!prefs[channel]) {
+            const log: ReminderLog = {
+                id: uuidv4(),
+                appointmentId: opts.appointmentId,
+                patientId: patient.id,
+                patientName,
+                phone,
+                channel,
+                status: "not_configured",
+                message: "",
+                error: `Patient has disabled ${channel} reminders`,
+                sentAt: new Date().toISOString(),
+                appointmentDate: appt.appointmentDate,
+                timeSlot: appt.timeSlot,
+                ruleKey,
+                triggerType,
+                dueAt,
+            };
+            demoReminderLogs.push(log);
+            return {
+                success: false,
+                message: `Patient has disabled ${channel} reminders.`,
+                log,
+                httpStatus: 200,
+            };
+        }
+    }
+
+    // ── Phase 5C: template rendering ──
+    // Custom message always wins; otherwise use per-rule template.
+    const message = opts.message || renderTemplate(ruleKey, {
+        patientName,
+        appointmentDate: appt.appointmentDate,
+        timeSlot: appt.timeSlot,
+    });
 
     const baseLog: Omit<ReminderLog, "id" | "status" | "error" | "waUrl"> = {
         appointmentId: opts.appointmentId,

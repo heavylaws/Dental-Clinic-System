@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 
@@ -245,6 +245,9 @@ export default function Settings() {
                 </div>
             )}
 
+            {/* ─── Reminder Settings (Phase 5C) ─── */}
+            {user?.role === "admin" && <ReminderSettingsPanel />}
+
             {/* ─── Change Password ─── */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
                 <h2 className="text-xl font-bold text-gray-800 mb-6">🔒 Change Password</h2>
@@ -363,6 +366,203 @@ export default function Settings() {
                             ⚠️ Currently running in <strong>demo/in-memory mode</strong> — data resets on server restart.
                             Set <code>DATABASE_URL</code> to switch to persistent PostgreSQL storage.
                         </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
+// ─── Reminder Settings Panel (Phase 5C) ──────────────────────────────────────
+
+const RULE_KEYS = ["day_before_18h", "same_day_08h", "two_hours_before"] as const;
+const RULE_LABELS: Record<string, string> = {
+    day_before_18h: "Day before (18:00)",
+    same_day_08h: "Same day (08:00)",
+    two_hours_before: "2 hours before",
+};
+const CHANNELS = ["whatsapp", "sms", "email"] as const;
+
+type ReminderSettingsData = {
+    schedulerEnabled: boolean;
+    defaultChannel: "whatsapp" | "sms" | "email";
+    rules: Record<string, { enabled: boolean; channel: "whatsapp" | "sms" | "email" }>;
+    templates: Record<string, string>;
+};
+
+function ReminderSettingsPanel() {
+    const qc = useQueryClient();
+    const { data, isLoading } = useQuery({
+        queryKey: ["reminder-settings"],
+        queryFn: () => api.reminders.settings(),
+    });
+
+    const [draft, setDraft] = useState<ReminderSettingsData | null>(null);
+    const [saved, setSaved] = useState(false);
+    const [expanded, setExpanded] = useState(false);
+
+    useEffect(() => {
+        if (data && !draft) setDraft(structuredClone(data));
+    }, [data, draft]);
+
+    const saveMutation = useMutation({
+        mutationFn: () => api.reminders.updateSettings(draft!),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ["reminder-settings"] });
+            qc.invalidateQueries({ queryKey: ["reminder-scheduler-status"] });
+            setSaved(true);
+            setTimeout(() => setSaved(false), 2000);
+        },
+    });
+
+    const resetMutation = useMutation({
+        mutationFn: () => api.reminders.resetSettings(),
+        onSuccess: (d) => {
+            setDraft(structuredClone(d));
+            qc.invalidateQueries({ queryKey: ["reminder-settings"] });
+        },
+    });
+
+    const setField = useCallback(<K extends keyof ReminderSettingsData>(key: K, val: ReminderSettingsData[K]) => {
+        setDraft((prev) => prev ? { ...prev, [key]: val } : prev);
+    }, []);
+
+    const setRuleField = useCallback(
+        (ruleKey: string, field: "enabled" | "channel", val: boolean | string) => {
+            setDraft((prev) => {
+                if (!prev) return prev;
+                return {
+                    ...prev,
+                    rules: {
+                        ...prev.rules,
+                        [ruleKey]: { ...prev.rules[ruleKey], [field]: val },
+                    },
+                };
+            });
+        },
+        []
+    );
+
+    const setTemplate = useCallback((ruleKey: string, val: string) => {
+        setDraft((prev) => {
+            if (!prev) return prev;
+            return { ...prev, templates: { ...prev.templates, [ruleKey]: val } };
+        });
+    }, []);
+
+    if (isLoading || !draft) return null;
+
+    return (
+        <div className="bg-white rounded-2xl shadow-sm border border-violet-200 p-6 mb-8">
+            <button
+                type="button"
+                className="w-full flex items-center justify-between"
+                onClick={() => setExpanded((v) => !v)}
+            >
+                <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                    🔔 Reminder Settings
+                </h2>
+                <span className="text-gray-400 text-sm">{expanded ? "▲ collapse" : "▼ expand"}</span>
+            </button>
+
+            {expanded && (
+                <div className="mt-6 space-y-6">
+                    {/* ── Master toggles ── */}
+                    <div className="grid grid-cols-2 gap-4">
+                        <label className="flex items-center gap-3 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={draft.schedulerEnabled}
+                                onChange={(e) => setField("schedulerEnabled", e.target.checked)}
+                                className="w-4 h-4 accent-violet-600"
+                            />
+                            <span className="text-sm font-semibold text-gray-700">Auto-scheduler enabled</span>
+                        </label>
+                        <div className="flex items-center gap-3">
+                            <span className="text-sm font-semibold text-gray-600 whitespace-nowrap">Default channel</span>
+                            <select
+                                value={draft.defaultChannel}
+                                onChange={(e) => setField("defaultChannel", e.target.value as "whatsapp" | "sms" | "email")}
+                                className="flex-1 px-2 py-1.5 border rounded-lg text-sm"
+                            >
+                                {CHANNELS.map((c) => <option key={c} value={c}>{c}</option>)}
+                            </select>
+                        </div>
+                    </div>
+
+                    {/* ── Per-rule settings ── */}
+                    <div>
+                        <p className="text-xs font-bold uppercase tracking-wide text-gray-400 mb-3">Automatic rules</p>
+                        <div className="space-y-3">
+                            {RULE_KEYS.map((key) => {
+                                const rule = draft.rules[key] ?? { enabled: true, channel: "whatsapp" };
+                                return (
+                                    <div key={key} className="flex items-center gap-4 p-3 bg-gray-50 rounded-xl border border-gray-100">
+                                        <input
+                                            type="checkbox"
+                                            checked={rule.enabled}
+                                            onChange={(e) => setRuleField(key, "enabled", e.target.checked)}
+                                            className="w-4 h-4 accent-violet-600 shrink-0"
+                                        />
+                                        <span className="text-sm font-semibold text-gray-700 flex-1">{RULE_LABELS[key]}</span>
+                                        <select
+                                            value={rule.channel}
+                                            onChange={(e) => setRuleField(key, "channel", e.target.value)}
+                                            disabled={!rule.enabled}
+                                            className="px-2 py-1 border rounded-lg text-xs disabled:opacity-40"
+                                        >
+                                            {CHANNELS.map((c) => <option key={c} value={c}>{c}</option>)}
+                                        </select>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    {/* ── Templates ── */}
+                    <div>
+                        <p className="text-xs font-bold uppercase tracking-wide text-gray-400 mb-3">
+                            Message templates <span className="font-normal normal-case opacity-70">— variables: {"{patientName}"}, {"{appointmentDate}"}, {"{timeSlot}"}, {"{clinicName}"}</span>
+                        </p>
+                        <div className="space-y-4">
+                            {(["manual", ...RULE_KEYS] as string[]).map((key) => (
+                                <div key={key}>
+                                    <label className="block text-xs font-semibold text-gray-500 mb-1 capitalize">
+                                        {key === "manual" ? "Manual reminder" : RULE_LABELS[key]}
+                                    </label>
+                                    <textarea
+                                        rows={2}
+                                        value={draft.templates[key] ?? ""}
+                                        onChange={(e) => setTemplate(key, e.target.value)}
+                                        className="w-full px-3 py-2 border rounded-lg text-sm resize-y focus:ring-2 focus:ring-violet-400 outline-none"
+                                    />
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* ── Actions ── */}
+                    <div className="flex items-center gap-4 pt-2 border-t border-gray-100">
+                        <button
+                            type="button"
+                            onClick={() => saveMutation.mutate()}
+                            disabled={saveMutation.isPending}
+                            className="px-5 py-2 bg-violet-600 text-white font-bold rounded-xl hover:bg-violet-700 transition disabled:opacity-50 text-sm"
+                        >
+                            {saveMutation.isPending ? "Saving…" : "💾 Save"}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => resetMutation.mutate()}
+                            disabled={resetMutation.isPending}
+                            className="px-5 py-2 bg-gray-100 text-gray-600 font-semibold rounded-xl hover:bg-gray-200 transition disabled:opacity-50 text-sm"
+                        >
+                            {resetMutation.isPending ? "Resetting…" : "↺ Reset to defaults"}
+                        </button>
+                        {saved && <span className="text-emerald-600 font-semibold text-sm">✅ Saved!</span>}
+                        {saveMutation.isError && (
+                            <span className="text-red-500 text-sm">{(saveMutation.error as any)?.message ?? "Save failed"}</span>
+                        )}
                     </div>
                 </div>
             )}

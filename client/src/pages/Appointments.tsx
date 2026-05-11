@@ -1535,6 +1535,19 @@ function DetailsPanel({
         queryFn: () => api.reminders.logs({ appointmentId: appt.id }),
     });
 
+    // Phase 5C: patient reminder preferences
+    const patientId: string | undefined = (appt as any).patientId;
+    const { data: patientPrefs, refetch: refetchPrefs } = useQuery({
+        queryKey: ["reminder-prefs", patientId],
+        queryFn: () => api.reminders.preferences(patientId!),
+        enabled: !!patientId,
+    });
+    const prefMutation = useMutation({
+        mutationFn: (enabled: boolean) =>
+            api.reminders.updatePreferences(patientId!, { remindersEnabled: enabled }),
+        onSuccess: () => void refetchPrefs(),
+    });
+
     return (
         <div
             className="fixed inset-0 bg-black/40 flex items-center justify-center z-40 p-4"
@@ -1640,13 +1653,35 @@ function DetailsPanel({
                     </button>
                 </div>
 
-                {/* ─── Send Reminder (Phase 5A) ─── */}
+                {/* ─── Send Reminder (Phase 5A + 5C) ─── */}
                 <div className="border-t border-gray-100 pt-4">
                     <div className="flex items-center justify-between mb-2">
                         <span className="text-xs font-bold uppercase tracking-wide text-gray-400">
                             Reminder
                         </span>
+                        {/* Phase 5C: patient opt-in/out toggle */}
+                        {patientId && patientPrefs !== undefined && (
+                            <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                                <input
+                                    type="checkbox"
+                                    checked={patientPrefs.remindersEnabled}
+                                    onChange={(e) => prefMutation.mutate(e.target.checked)}
+                                    disabled={prefMutation.isPending}
+                                    className="w-3.5 h-3.5 accent-violet-600"
+                                />
+                                <span className="text-[11px] font-semibold text-gray-500">
+                                    {patientPrefs.remindersEnabled ? "Opted in" : "Opted out"}
+                                </span>
+                            </label>
+                        )}
                     </div>
+
+                    {/* Opt-out notice */}
+                    {patientPrefs && !patientPrefs.remindersEnabled && (
+                        <div className="mb-2 px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-lg text-[11px] text-amber-700 font-semibold">
+                            ⚠ Patient has opted out — reminders will be logged but not delivered.
+                        </div>
+                    )}
 
                     <button
                         type="button"

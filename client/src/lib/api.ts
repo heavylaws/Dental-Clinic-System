@@ -536,6 +536,55 @@ export const api = {
                     errors: string[];
                 };
             }>("/reminders/scheduler/run-once", { method: "POST" }),
+        settings: () =>
+            request<{
+                schedulerEnabled: boolean;
+                defaultChannel: "whatsapp" | "sms" | "email";
+                rules: Record<string, { enabled: boolean; channel: "whatsapp" | "sms" | "email" }>;
+                templates: Record<string, string>;
+            }>("/reminders/settings"),
+        updateSettings: (payload: {
+            schedulerEnabled?: boolean;
+            defaultChannel?: "whatsapp" | "sms" | "email";
+            rules?: Record<string, { enabled?: boolean; channel?: "whatsapp" | "sms" | "email" }>;
+            templates?: Record<string, string>;
+        }) =>
+            request<{
+                schedulerEnabled: boolean;
+                defaultChannel: "whatsapp" | "sms" | "email";
+                rules: Record<string, { enabled: boolean; channel: "whatsapp" | "sms" | "email" }>;
+                templates: Record<string, string>;
+            }>("/reminders/settings", {
+                method: "PUT",
+                body: JSON.stringify(payload),
+            }),
+        resetSettings: () =>
+            request<{
+                schedulerEnabled: boolean;
+                defaultChannel: "whatsapp" | "sms" | "email";
+                rules: Record<string, { enabled: boolean; channel: "whatsapp" | "sms" | "email" }>;
+                templates: Record<string, string>;
+            }>("/reminders/settings/reset", { method: "POST" }),
+        preferences: (patientId: string) =>
+            request<{
+                remindersEnabled: boolean;
+                whatsapp: boolean;
+                sms: boolean;
+                email: boolean;
+            }>(`/reminders/preferences/${patientId}`),
+        updatePreferences: (
+            patientId: string,
+            payload: { remindersEnabled?: boolean; whatsapp?: boolean; sms?: boolean; email?: boolean }
+        ) =>
+            request<{
+                remindersEnabled: boolean;
+                whatsapp: boolean;
+                sms: boolean;
+                email: boolean;
+            }>(`/reminders/preferences/${patientId}`, {
+                method: "PUT",
+                body: JSON.stringify(payload),
+            }),
     },
 
     // ─── AI ───────────────────────────────────────────────────────────

@@ -881,6 +881,151 @@ Inside the `DetailsPanel` reminder section, below the mini reminder log:
 
 ---
 
+## Phase 5C — Reminder Settings, Templates, and Opt-In/Out Foundation
+
+**Status:** ✅ COMPLETE
+
+### Goal
+
+Add a safe reminder configuration layer: editable templates, enable/disable rules, default channel control, and patient-level opt-in/opt-out. No new dependencies. No DB migrations. No SMS/email provider integrations.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `server/modules/reminder/settings.ts` | **New** — in-memory settings store, patient preferences map, `renderTemplate()`, `getReminderSettings / setReminderSettings / resetReminderSettings`, `getPatientPreferences / setPatientPreferences` |
+| `server/modules/reminder/core.ts` | Updated — imports `renderTemplate` + `getPatientPreferences`; patient opt-out check before send; template rendering replaces hardcoded message builder |
+| `server/modules/reminder/scheduler.ts` | Updated — imports `getReminderSettings`; respects `schedulerEnabled`, per-rule `enabled`, per-rule `channel` |
+| `server/modules/reminder/index.ts` | Added `GET/PUT /settings`, `POST /settings/reset`, `GET/PUT /preferences/:patientId` routes |
+| `client/src/lib/api.ts` | Added `api.reminders.settings()`, `updateSettings()`, `resetSettings()`, `preferences()`, `updatePreferences()` |
+| `client/src/pages/Settings.tsx` | Added collapsible `ReminderSettingsPanel` (admin-only) — master toggle, default channel, per-rule toggles/channels, template textareas, Save + Reset-to-defaults |
+| `client/src/pages/Appointments.tsx` | Added patient opt-out toggle + opt-out notice banner inside `DetailsPanel` reminder section |
+| `PRODUCT_PHASES.md` | This entry |
+
+### Reminder Settings Model
+
+```ts
+{
+  schedulerEnabled: boolean,         // master auto-scheduler on/off (app-level)
+  defaultChannel: "whatsapp"|"sms"|"email",
+  rules: {
+    day_before_18h:   { enabled: boolean, channel: "whatsapp"|"sms"|"email" },
+    same_day_08h:     { enabled: boolean, channel: "whatsapp"|"sms"|"email" },
+    two_hours_before: { enabled: boolean, channel: "whatsapp"|"sms"|"email" },
+  },
+  templates: {
+    manual:           string,
+    day_before_18h:   string,
+    same_day_08h:     string,
+    two_hours_before: string,
+  }
+}
+```
+
+**Defaults:** all rules enabled, channel `whatsapp`, templates use all four variables.
+
+**Persistence:** in-memory (resets on server restart). Document as limitation.
+
+### Template Variables
+
+| Variable | Value |
+|----------|-------|
+| `{patientName}` | Patient's full name |
+| `{appointmentDate}` | Appointment date string (YYYY-MM-DD) |
+| `{timeSlot}` | Appointment time (HH:MM) |
+| `{clinicName}` | `demoSettings.clinic_name` or `"Dental Clinic"` |
+
+Missing variables in template are left as-is (no crash). Custom `message` in `sendAppointmentReminder()` always overrides the template.
+
+### Settings Endpoints
+
+| Method | Path | Notes |
+|--------|------|-------|
+| `GET` | `/api/reminders/settings` | Returns current settings |
+| `PUT` | `/api/reminders/settings` | Merges partial patch; validates channels; 400 on invalid |
+| `POST` | `/api/reminders/settings/reset` | Resets to defaults |
+
+All auth-required.
+
+### Patient Preferences Model
+
+```ts
+{
+  remindersEnabled: boolean,   // master opt-in/out
+  whatsapp: boolean,
+  sms: boolean,
+  email: boolean,
+}
+```
+
+**Default:** `remindersEnabled: true, whatsapp: true, sms: false, email: false`.
+
+**Storage:** in-memory `Map<patientId, prefs>` (resets on restart).
+
+### Patient Preference Endpoints
+
+| Method | Path | Notes |
+|--------|------|-------|
+| `GET` | `/api/reminders/preferences/:patientId` | Returns prefs or defaults |
+| `PUT` | `/api/reminders/preferences/:patientId` | Merges partial patch |
+
+### Opt-Out Behavior
+
+When `remindersEnabled: false`:
+- `sendAppointmentReminder()` creates a log with `status: "not_configured"`, `error: "Patient has opted out of reminders"`.
+- No WhatsApp/SMS/email attempt is made.
+- Applies to both **manual** and **automatic** reminders.
+- No force-override flag in Phase 5C.
+
+### Scheduler Integration (Phase 5C changes)
+
+- `schedulerEnabled: false` in settings → `runReminderSchedulerOnce()` returns immediately with `{ errors: ["Scheduler disabled via settings"] }`.
+- `REMINDER_SCHEDULER_ENABLED=false` env var → runtime scheduler never starts (Phase 5B behavior preserved).
+- Both controls are independent; env var controls process startup, settings control runtime behavior.
+- Per-rule `enabled: false` → rule is skipped in scheduler loop.
+- Per-rule `channel` → used as the send channel (with fallback to `defaultChannel`).
+- Idempotency key is `(appointmentId, channel, ruleKey)` — changing channel setting after a rule fires can allow a re-send on the new channel. Document as limitation.
+
+### Desktop UI
+
+**Settings page** (`/settings`, admin-only):
+- Collapsible `🔔 Reminder Settings` panel (violet border).
+- Master scheduler toggle + default channel select.
+- Per-rule rows: enabled checkbox + channel select.
+- Template textareas for all 4 keys with variable hint.
+- **Save** and **↺ Reset to defaults** buttons.
+- Invalidates `reminder-settings` and `reminder-scheduler-status` query cache on save.
+
+**Appointments DetailsPanel**:
+- Opt-in/out checkbox beside "Reminder" heading, showing current patient preference.
+- Amber warning banner when patient is opted out.
+- Toggle saves immediately via `PUT /api/reminders/preferences/:patientId`.
+
+### Mobile Decision
+
+**No mobile changes.** The existing Phase 5A Reminder button calls `api.reminders.send()` which now naturally routes through `sendAppointmentReminder()`. Opt-out is enforced on the backend — if opted out, the response returns a clear message and a `not_configured` log. Mobile banner (if applicable) shows whatever message the backend returns. No mobile settings UI added.
+
+### Build Results
+
+| Command | Result |
+|---------|--------|
+| `npx tsc --noEmit` | ✅ exit 0 |
+| `npx vite build` | ✅ built in 6.29s |
+| `npx tsc -p tsconfig.server.json` | ✅ exit 0 |
+
+### Known Limitations
+
+- **Settings and preferences are in-memory** — reset on server restart. DB migration needed for production.
+- **Opt-out channel granularity deferred** — `remindersEnabled` is a single master flag; per-channel opt-out (`sms: false`) has no effect on sending yet (only WhatsApp is implemented).
+- **No force-send override** — opted-out patients cannot receive reminders even in urgent cases (TODO: Phase 5D).
+- **No SMS/email provider** — still stubbed as `not_configured`.
+- **Template variable `{appointmentDate}` is raw YYYY-MM-DD** — no locale formatting yet.
+- **Changing per-rule channel after a rule fired** — idempotency key includes `channel`, so a channel change allows re-send on new channel.
+- **Multi-instance still needs DB-backed locks** for idempotency and settings consistency.
+- **No mobile settings UI** — deferred to a later phase.
+
+---
+
 ## Future Phases (Not Yet Defined)
 
 To be filled in by product owner.

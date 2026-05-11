@@ -1,11 +1,19 @@
-// ─── Reminder Module — Phase 5A + 5B ─────────────────────────────────────────
+// ─── Reminder Module — Phase 5A + 5B + 5C ────────────────────────────────────
 // HTTP router only. Shared types and send logic live in core.ts.
 // Scheduler state lives in scheduler.ts.
+// Settings and preferences live in settings.ts.
 
 import { Router } from "express";
 import { requireAuth } from "../auth/index.js";
 import { demoReminderLogs, sendAppointmentReminder } from "./core.js";
 import { getSchedulerState, runReminderSchedulerOnce } from "./scheduler.js";
+import {
+    getReminderSettings,
+    setReminderSettings,
+    resetReminderSettings,
+    getPatientPreferences,
+    setPatientPreferences,
+} from "./settings.js";
 
 // Re-export for consumers (e.g. server startup code)
 export type { ReminderLog, SendReminderOptions, SendReminderResult } from "./core.js";
@@ -64,6 +72,49 @@ router.post("/scheduler/run-once", async (_req, res) => {
         res.json({ success: true, summary });
     } catch (e: any) {
         res.status(500).json({ success: false, message: e.message });
+    }
+});
+
+// ─── Settings routes (Phase 5C) ───────────────────────────────────────────────
+
+// GET /api/reminders/settings
+router.get("/settings", (_req, res) => {
+    res.json(getReminderSettings());
+});
+
+// PUT /api/reminders/settings
+router.put("/settings", (req, res) => {
+    try {
+        const updated = setReminderSettings(req.body ?? {});
+        res.json(updated);
+    } catch (e: any) {
+        res.status(400).json({ error: e.message });
+    }
+});
+
+// POST /api/reminders/settings/reset
+router.post("/settings/reset", (_req, res) => {
+    res.json(resetReminderSettings());
+});
+
+// ─── Patient preference routes (Phase 5C) ────────────────────────────────────
+
+// GET /api/reminders/preferences/:patientId
+router.get("/preferences/:patientId", (req, res) => {
+    const { patientId } = req.params;
+    if (!patientId) return res.status(400).json({ error: "patientId required" });
+    res.json(getPatientPreferences(patientId));
+});
+
+// PUT /api/reminders/preferences/:patientId
+router.put("/preferences/:patientId", (req, res) => {
+    const { patientId } = req.params;
+    if (!patientId) return res.status(400).json({ error: "patientId required" });
+    try {
+        const updated = setPatientPreferences(patientId, req.body ?? {});
+        res.json(updated);
+    } catch (e: any) {
+        res.status(400).json({ error: e.message });
     }
 });
 
