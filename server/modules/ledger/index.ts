@@ -22,6 +22,17 @@ interface LedgerEntry {
     status?: string;
 }
 
+interface LedgerAdjustment {
+    id: string;
+    patientId: string;
+    date: string;
+    amount: number;
+    description: string;
+    direction: "debit" | "credit";
+    sourceType?: "manual" | "payment";
+    sourceId?: string;
+}
+
 interface PatientLedger {
     patientId: string;
     patientName: string;
@@ -47,14 +58,52 @@ interface PatientBalanceSummary {
 }
 
 // In-memory adjustments for demo (resets on server restart)
-const demoAdjustments: Array<{
-    id: string;
+const demoAdjustments: LedgerAdjustment[] = [];
+
+export function createLedgerCreditEntry(params: {
     patientId: string;
-    date: string;
     amount: number;
     description: string;
-    direction: "debit" | "credit";
-}> = [];
+    sourceId: string;
+    sourceType?: "manual" | "payment";
+    date?: string;
+}): LedgerEntry {
+    const patient = demoPatients.find((p) => p.id === params.patientId);
+    if (!patient) {
+        throw new Error("Patient not found");
+    }
+
+    const amount = safeParseFloat(params.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+        throw new Error("Amount must be a positive number");
+    }
+
+    const adjustment: LedgerAdjustment = {
+        id: uuidv4(),
+        patientId: params.patientId,
+        date: params.date || new Date().toISOString(),
+        amount,
+        description: params.description || "Manual adjustment",
+        direction: "credit",
+        sourceType: params.sourceType || "payment",
+        sourceId: params.sourceId,
+    };
+
+    demoAdjustments.push(adjustment);
+
+    return {
+        id: `adj-${adjustment.id}`,
+        patientId: adjustment.patientId,
+        date: adjustment.date,
+        type: adjustment.sourceType === "payment" ? "payment" : "adjustment",
+        sourceType: adjustment.sourceType === "payment" ? "payment" : "manual",
+        sourceId: adjustment.sourceId || adjustment.id,
+        description: adjustment.description,
+        debit: 0,
+        credit: adjustment.amount,
+        balanceAfter: 0,
+    };
+}
 
 // ─── Helper Functions ──────────────────────────────────────────────────────
 
@@ -130,13 +179,14 @@ function computeLedgerEntries(patientId: string): LedgerEntry[] {
     // Add manual adjustments
     const adjustments = getPatientAdjustments(patientId);
     for (const adj of adjustments) {
+        const isPaymentCredit = adj.sourceType === "payment" && adj.direction === "credit";
         entries.push({
             id: `adj-${adj.id}`,
             patientId,
             date: adj.date,
-            type: "adjustment",
-            sourceType: "manual",
-            sourceId: adj.id,
+            type: isPaymentCredit ? "payment" : "adjustment",
+            sourceType: isPaymentCredit ? "payment" : "manual",
+            sourceId: adj.sourceId || adj.id,
             description: adj.description || "Manual adjustment",
             debit: adj.direction === "debit" ? adj.amount : 0,
             credit: adj.direction === "credit" ? adj.amount : 0,

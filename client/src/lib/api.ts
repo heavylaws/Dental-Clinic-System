@@ -650,4 +650,101 @@ export const api = {
                 }
             ),
     },
+
+    // ─── Payment Plans (Phase 6B) ─────────────────────────────────────
+
+    paymentPlans: {
+        patient: (patientId: string) =>
+            request<{
+                patientId: string;
+                patientName: string;
+                plans: Array<{
+                    plan: {
+                        id: string;
+                        patientId: string;
+                        title: string;
+                        description?: string;
+                        totalAmount: number;
+                        downPayment: number;
+                        installmentCount: number;
+                        installmentAmount: number;
+                        startDate: string;
+                        frequency: "weekly" | "biweekly" | "monthly";
+                        status: "active" | "completed" | "cancelled";
+                        createdAt: string;
+                        updatedAt: string;
+                    };
+                    installments: Array<{
+                        id: string;
+                        planId: string;
+                        patientId: string;
+                        installmentNumber: number;
+                        dueDate: string;
+                        amount: number;
+                        paidAmount: number;
+                        status: "pending" | "partial" | "paid" | "overdue" | "cancelled";
+                        paidAt?: string | null;
+                    }>;
+                    summary: {
+                        totalAmount: number;
+                        downPayment: number;
+                        scheduledAmount: number;
+                        paidAmount: number;
+                        remainingAmount: number;
+                        nextDueDate: string | null;
+                        overdueAmount: number;
+                        overdueCount: number;
+                    };
+                }>;
+            }>(`/payment-plans/patient/${patientId}`),
+        create: (
+            patientId: string,
+            payload: {
+                title: string;
+                description?: string;
+                totalAmount: number;
+                downPayment?: number;
+                installmentCount: number;
+                startDate: string;
+                frequency: "weekly" | "biweekly" | "monthly";
+            }
+        ) =>
+            request<{
+                success: boolean;
+                plan: any;
+                installments: any[];
+                summary: any;
+                note?: string;
+            }>(`/payment-plans/patient/${patientId}`, {
+                method: "POST",
+                body: JSON.stringify(payload),
+            }),
+        updateStatus: (planId: string, status: "active" | "completed" | "cancelled") =>
+            request<{
+                success: boolean;
+                plan: any;
+                installments: any[];
+                summary: any;
+            }>(`/payment-plans/${planId}/status`, {
+                method: "PUT",
+                body: JSON.stringify({ status }),
+            }),
+        payInstallment: (
+            installmentId: string,
+            payload: { amount: number; note?: string }
+        ) =>
+            request<{
+                success: boolean;
+                payment: any;
+                installment: any;
+                summary: any;
+                ledgerEntry?: any;
+                note?: string;
+            }>(`/payment-plans/installments/${installmentId}/payment`, {
+                method: "POST",
+                body: JSON.stringify(payload),
+            }),
+    },
 };
+
+export default api;

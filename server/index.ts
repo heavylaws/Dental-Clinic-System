@@ -29,6 +29,7 @@ import { dashboardRouter } from "./modules/dashboard/index.js";
 import { reminderRouter } from "./modules/reminder/index.js";
 import { startReminderScheduler } from "./modules/reminder/scheduler.js";
 import { ledgerRouter } from "./modules/ledger/index.js";
+import { paymentPlanRouter } from "./modules/paymentPlan/index.js";
 import { setupWebSocket } from "./ws.js";
 import { createAuditMiddleware, auditLog } from "./audit.js";
 import { demoSettings } from "./demo-store.js";
@@ -137,6 +138,7 @@ app.use("/api/whatsapp", whatsappRouter);
 app.use("/api/dashboard", dashboardRouter);
 app.use("/api/reminders", reminderRouter);
 app.use("/api/ledger", ledgerRouter);
+app.use("/api/payment-plans", paymentPlanRouter);
 
 // ─── Reminder Scheduler (Phase 5B) ─────────────────────────────────
 // Safe to start here — idempotency prevents duplicate sends on hot-reload.

@@ -221,6 +221,12 @@ export default function PatientFile({ user }: PatientFileProps) {
                                         >
                                             💰 Account Ledger
                                         </TabsTrigger>
+                                        <TabsTrigger
+                                            value="payment_plans"
+                                            className="px-4 py-2 rounded-lg data-[state=active]:bg-white data-[state=active]:text-primary-700 data-[state=active]:shadow-sm font-semibold text-gray-500"
+                                        >
+                                            📅 Payment Plans
+                                        </TabsTrigger>
                                     </TabsList>
                                 </div>
 
@@ -471,6 +477,10 @@ export default function PatientFile({ user }: PatientFileProps) {
 
                                 <TabsContent value="ledger">
                                     <AccountLedger patientId={id!} />
+                                </TabsContent>
+
+                                <TabsContent value="payment_plans">
+                                    <PaymentPlansSection patientId={id!} user={user} />
                                 </TabsContent>
                             </Tabs>
                         </div>
@@ -1845,6 +1855,537 @@ function AccountLedger({ patientId }: { patientId: string }) {
                 Ledger computed from {totals.invoiceCount} invoice(s) and {totals.paymentCount} payment(s)
                 {totals.lastChargeDate && ` · Last charge: ${new Date(totals.lastChargeDate).toLocaleDateString()}`}
             </div>
+        </div>
+    );
+}
+
+// ─── Payment Plans Section Component (Phase 6B) ───────────────────────
+
+function PaymentPlansSection({ patientId, user }: { patientId: string; user: any }) {
+    const [showCreateForm, setShowCreateForm] = useState(false);
+    const [expandedPlanId, setExpandedPlanId] = useState<string | null>(null);
+    const [payInstallmentId, setPayInstallmentId] = useState<string | null>(null);
+    const [paymentAmount, setPaymentAmount] = useState("");
+    const [paymentNote, setPaymentNote] = useState("");
+    const queryClient = useQueryClient();
+
+    // Form state
+    const [planTitle, setPlanTitle] = useState("");
+    const [planDescription, setPlanDescription] = useState("");
+    const [totalAmount, setTotalAmount] = useState("");
+    const [downPayment, setDownPayment] = useState("0");
+    const [installmentCount, setInstallmentCount] = useState("3");
+    const [startDate, setStartDate] = useState(() => new Date().toISOString().split("T")[0]);
+    const [frequency, setFrequency] = useState<"weekly" | "biweekly" | "monthly">("monthly");
+
+    const { data: paymentPlansData, isLoading, isError, refetch } = useQuery({
+        queryKey: ["payment-plans", "patient", patientId],
+        queryFn: () => api.paymentPlans.patient(patientId),
+    });
+
+    const createPlanMutation = useMutation({
+        mutationFn: (payload: any) => api.paymentPlans.create(patientId, payload),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["payment-plans", "patient", patientId] });
+            queryClient.invalidateQueries({ queryKey: ["ledger", "patient", patientId] });
+            setShowCreateForm(false);
+            resetForm();
+        },
+    });
+
+    const updateStatusMutation = useMutation({
+        mutationFn: ({ planId, status }: { planId: string; status: string }) =>
+            api.paymentPlans.updateStatus(planId, status as any),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["payment-plans", "patient", patientId] });
+        },
+    });
+
+    const payInstallmentMutation = useMutation({
+        mutationFn: ({ installmentId, amount, note }: { installmentId: string; amount: number; note: string }) =>
+            api.paymentPlans.payInstallment(installmentId, { amount, note }),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ["payment-plans", "patient", patientId] });
+            queryClient.invalidateQueries({ queryKey: ["ledger", "patient", patientId] });
+            setPayInstallmentId(null);
+            setPaymentAmount("");
+            setPaymentNote("");
+        },
+    });
+
+    function resetForm() {
+        setPlanTitle("");
+        setPlanDescription("");
+        setTotalAmount("");
+        setDownPayment("0");
+        setInstallmentCount("3");
+        setStartDate(new Date().toISOString().split("T")[0]);
+        setFrequency("monthly");
+    }
+
+    function calculatePreview() {
+        const total = parseFloat(totalAmount) || 0;
+        const down = parseFloat(downPayment) || 0;
+        const count = parseInt(installmentCount) || 1;
+        const remaining = Math.max(0, total - down);
+
+        const installmentAmounts: number[] = [];
+        if (remaining > 0 && count > 0) {
+            const roundedRemaining = Math.round(remaining * 100) / 100;
+            const baseAmount = Math.floor((roundedRemaining / count) * 100) / 100;
+            let allocated = 0;
+            for (let i = 0; i < count - 1; i++) {
+                installmentAmounts.push(baseAmount);
+                allocated = Math.round((allocated + baseAmount) * 100) / 100;
+            }
+            installmentAmounts.push(Math.round((roundedRemaining - allocated) * 100) / 100);
+        }
+
+        const baseInstallment = installmentAmounts.length > 0 ? installmentAmounts[0] : 0;
+        const finalInstallment = installmentAmounts.length > 0 ? installmentAmounts[installmentAmounts.length - 1] : 0;
+
+        return { total, down, remaining, count, baseInstallment, finalInstallment };
+    }
+
+    function handleCreatePlan(e: React.FormEvent) {
+        e.preventDefault();
+        const preview = calculatePreview();
+        createPlanMutation.mutate({
+            title: planTitle.trim(),
+            description: planDescription.trim() || undefined,
+            totalAmount: preview.total,
+            downPayment: preview.down,
+            installmentCount: preview.count,
+            startDate,
+            frequency,
+        });
+    }
+
+    function handlePayInstallment(e: React.FormEvent) {
+        e.preventDefault();
+        if (!payInstallmentId) return;
+
+        const amount = parseFloat(paymentAmount);
+        if (!Number.isFinite(amount) || amount <= 0) {
+            alert("Payment amount must be greater than 0.");
+            return;
+        }
+
+        const targetInstallment = plans
+            .flatMap((p: any) => p.installments)
+            .find((inst: any) => inst.id === payInstallmentId);
+
+        if (!targetInstallment) {
+            alert("Installment not found.");
+            return;
+        }
+
+        const remaining = Math.max(0, (targetInstallment.amount || 0) - (targetInstallment.paidAmount || 0));
+        if (amount > remaining) {
+            alert(`Payment cannot exceed remaining amount (${remaining.toFixed(2)}).`);
+            return;
+        }
+
+        payInstallmentMutation.mutate({
+            installmentId: payInstallmentId,
+            amount,
+            note: paymentNote.trim(),
+        });
+    }
+
+    if (isLoading) {
+        return (
+            <div className="text-center py-12">
+                <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary-600 mx-auto"></div>
+                <p className="text-gray-400 mt-4">Loading payment plans...</p>
+            </div>
+        );
+    }
+
+    if (isError) {
+        return (
+            <div className="text-center py-16 text-rose-600">
+                <p className="text-xl font-semibold">Unable to load payment plans.</p>
+                <p className="text-sm text-rose-400 mt-2">Please reload the patient file and try again.</p>
+            </div>
+        );
+    }
+
+    const plans = paymentPlansData?.plans || [];
+    const activePlans = plans.filter((p: any) => p.plan.status === "active");
+    const completedPlans = plans.filter((p: any) => p.plan.status === "completed");
+    const cancelledPlans = plans.filter((p: any) => p.plan.status === "cancelled");
+
+    return (
+        <div className="space-y-6">
+            {/* Header with Create Button */}
+            <div className="flex items-center justify-between">
+                <div>
+                    <h3 className="text-lg font-bold text-gray-900">Payment Plans</h3>
+                    <p className="text-sm text-gray-500">
+                        {activePlans.length} active · {completedPlans.length} completed · {cancelledPlans.length} cancelled
+                    </p>
+                </div>
+                <button
+                    onClick={() => setShowCreateForm(true)}
+                    className="px-4 py-2 bg-primary-600 text-white font-semibold rounded-lg hover:bg-primary-700 transition"
+                >
+                    + Create Payment Plan
+                </button>
+            </div>
+
+            {/* Create Plan Form */}
+            {showCreateForm && (
+                <div className="bg-white rounded-xl border border-gray-200 p-6">
+                    <h4 className="text-lg font-bold text-gray-900 mb-4">Create Payment Plan</h4>
+                    <form onSubmit={handleCreatePlan} className="space-y-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-1">Title *</label>
+                                <input
+                                    type="text"
+                                    value={planTitle}
+                                    onChange={(e) => setPlanTitle(e.target.value)}
+                                    placeholder="e.g., Orthodontic Treatment"
+                                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                                    required
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-1">Description</label>
+                                <input
+                                    type="text"
+                                    value={planDescription}
+                                    onChange={(e) => setPlanDescription(e.target.value)}
+                                    placeholder="Optional details..."
+                                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-1">Total Amount ($) *</label>
+                                <input
+                                    type="number"
+                                    min="0.01"
+                                    step="0.01"
+                                    value={totalAmount}
+                                    onChange={(e) => setTotalAmount(e.target.value)}
+                                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                                    required
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-1">Down Payment ($)</label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={downPayment}
+                                    onChange={(e) => setDownPayment(e.target.value)}
+                                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-1">Installments *</label>
+                                <input
+                                    type="number"
+                                    min="1"
+                                    max="60"
+                                    value={installmentCount}
+                                    onChange={(e) => setInstallmentCount(e.target.value)}
+                                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                                    required
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-1">Start Date *</label>
+                                <input
+                                    type="date"
+                                    value={startDate}
+                                    onChange={(e) => setStartDate(e.target.value)}
+                                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                                    required
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-1">Frequency *</label>
+                                <select
+                                    value={frequency}
+                                    onChange={(e) => setFrequency(e.target.value as any)}
+                                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                                >
+                                    <option value="weekly">Weekly</option>
+                                    <option value="biweekly">Bi-weekly</option>
+                                    <option value="monthly">Monthly</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        {/* Preview */}
+                        {parseFloat(totalAmount) > 0 && (
+                            <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                                <p className="text-sm font-semibold text-gray-700 mb-2">Installment Preview:</p>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                                    <div>
+                                        <span className="text-gray-500">Total:</span>
+                                        <p className="font-semibold">${calculatePreview().total.toLocaleString()}</p>
+                                    </div>
+                                    <div>
+                                        <span className="text-gray-500">Down Payment (scheduled):</span>
+                                        <p className="font-semibold">${calculatePreview().down.toLocaleString()}</p>
+                                    </div>
+                                    <div>
+                                        <span className="text-gray-500">Remaining:</span>
+                                        <p className="font-semibold">${calculatePreview().remaining.toLocaleString()}</p>
+                                    </div>
+                                    <div>
+                                        <span className="text-gray-500">Installments:</span>
+                                        <p className="font-semibold">
+                                            ${calculatePreview().baseInstallment.toFixed(2)} × {Math.max(calculatePreview().count - 1, 0)}
+                                            {calculatePreview().count > 1 && ` + $${calculatePreview().finalInstallment.toFixed(2)}`}
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="flex justify-end gap-3">
+                            <button
+                                type="button"
+                                onClick={() => setShowCreateForm(false)}
+                                className="px-4 py-2 text-gray-600 font-semibold hover:bg-gray-100 rounded-lg transition"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="submit"
+                                disabled={createPlanMutation.isPending}
+                                className="px-6 py-2 bg-primary-600 text-white font-bold rounded-lg hover:bg-primary-700 transition disabled:opacity-50"
+                            >
+                                {createPlanMutation.isPending ? "Creating..." : "Create Plan"}
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            )}
+
+            {/* Payment Plans List */}
+            {plans.length === 0 ? (
+                <div className="text-center py-16 text-gray-400">
+                    <p className="text-5xl mb-4">📅</p>
+                    <p className="text-xl">No payment plans yet.</p>
+                    <p className="text-sm mt-2">Create a plan to schedule patient payments.</p>
+                </div>
+            ) : (
+                <div className="space-y-4">
+                    {plans.map((planData: any) => {
+                        const { plan, installments, summary } = planData;
+                        const isExpanded = expandedPlanId === plan.id;
+
+                        return (
+                            <div key={plan.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                                {/* Plan Header */}
+                                <div className="p-4 bg-gray-50 border-b border-gray-200">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <button
+                                                onClick={() => setExpandedPlanId(isExpanded ? null : plan.id)}
+                                                className="text-gray-500 hover:text-gray-700 transition"
+                                            >
+                                                {isExpanded ? "▼" : "▶"}
+                                            </button>
+                                            <div>
+                                                <h4 className="font-bold text-gray-900">{plan.title}</h4>
+                                                {plan.description && (
+                                                    <p className="text-sm text-gray-500">{plan.description}</p>
+                                                )}
+                                            </div>
+                                            <span
+                                                className={`px-2 py-1 rounded-full text-xs font-medium
+                                                    ${plan.status === "active" ? "bg-emerald-100 text-emerald-700" :
+                                                        plan.status === "completed" ? "bg-blue-100 text-blue-700" :
+                                                            "bg-gray-100 text-gray-700"}`}
+                                            >
+                                                {plan.status}
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center gap-4">
+                                            <div className="text-right">
+                                                <p className="text-sm text-gray-500">
+                                                    ${summary.paidAmount.toLocaleString()} / ${summary.totalAmount.toLocaleString()}
+                                                </p>
+                                                <p className="text-xs text-gray-400">
+                                                    {summary.remainingAmount > 0 ? `$${summary.remainingAmount.toLocaleString()} remaining` : "Paid in full"}
+                                                </p>
+                                            </div>
+                                            {plan.status === "active" && (
+                                                <button
+                                                    onClick={() => {
+                                                        if (confirm("Cancel this payment plan? Unpaid installments will be marked as cancelled.")) {
+                                                            updateStatusMutation.mutate({ planId: plan.id, status: "cancelled" });
+                                                        }
+                                                    }}
+                                                    className="px-3 py-1 text-sm text-rose-600 hover:bg-rose-50 rounded-lg transition"
+                                                >
+                                                    Cancel
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* Summary Bar */}
+                                    <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                                        <div>
+                                            <span className="text-gray-500">Total:</span>
+                                            <p className="font-semibold">${summary.totalAmount.toLocaleString()}</p>
+                                        </div>
+                                        <div>
+                                            <span className="text-gray-500">Paid:</span>
+                                            <p className="font-semibold text-emerald-600">${summary.paidAmount.toLocaleString()}</p>
+                                        </div>
+                                        <div>
+                                            <span className="text-gray-500">Remaining:</span>
+                                            <p className={`font-semibold ${summary.remainingAmount > 0 ? "text-rose-600" : "text-emerald-600"}`}>
+                                                ${summary.remainingAmount.toLocaleString()}
+                                            </p>
+                                        </div>
+                                        <div>
+                                            <span className="text-gray-500">Next Due:</span>
+                                            <p className="font-semibold">
+                                                {summary.nextDueDate
+                                                    ? new Date(summary.nextDueDate).toLocaleDateString()
+                                                    : "—"}
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    {summary.overdueCount > 0 && (
+                                        <div className="mt-2 px-3 py-2 bg-rose-50 border border-rose-200 rounded-lg">
+                                            <p className="text-sm text-rose-700">
+                                                ⚠️ {summary.overdueCount} overdue installment(s) · ${summary.overdueAmount.toLocaleString()} due
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Installments Table */}
+                                {isExpanded && (
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-left">
+                                            <thead className="bg-gray-50">
+                                                <tr>
+                                                    <th className="px-4 py-2 text-xs font-semibold text-gray-600">#</th>
+                                                    <th className="px-4 py-2 text-xs font-semibold text-gray-600">Due Date</th>
+                                                    <th className="px-4 py-2 text-xs font-semibold text-gray-600 text-right">Amount</th>
+                                                    <th className="px-4 py-2 text-xs font-semibold text-gray-600 text-right">Paid</th>
+                                                    <th className="px-4 py-2 text-xs font-semibold text-gray-600">Status</th>
+                                                    <th className="px-4 py-2 text-xs font-semibold text-gray-600">Action</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-100">
+                                                {installments.map((inst: any) => (
+                                                    <tr key={inst.id} className="hover:bg-gray-50">
+                                                        <td className="px-4 py-3 text-sm font-medium">{inst.installmentNumber}</td>
+                                                        <td className="px-4 py-3 text-sm">
+                                                            {new Date(inst.dueDate).toLocaleDateString()}
+                                                        </td>
+                                                        <td className="px-4 py-3 text-sm text-right">${inst.amount.toLocaleString()}</td>
+                                                        <td className="px-4 py-3 text-sm text-right">
+                                                            {inst.paidAmount > 0 ? (
+                                                                <span className="text-emerald-600">${inst.paidAmount.toLocaleString()}</span>
+                                                            ) : (
+                                                                "—"
+                                                            )}
+                                                        </td>
+                                                        <td className="px-4 py-3">
+                                                            <span
+                                                                className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium
+                                                                    ${inst.status === "paid" ? "bg-emerald-100 text-emerald-700" :
+                                                                        inst.status === "partial" ? "bg-amber-100 text-amber-700" :
+                                                                            inst.status === "overdue" ? "bg-rose-100 text-rose-700" :
+                                                                                inst.status === "cancelled" ? "bg-gray-100 text-gray-500" :
+                                                                                    "bg-blue-100 text-blue-700"}`}
+                                                            >
+                                                                {inst.status}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-4 py-3">
+                                                            {plan.status === "active" &&
+                                                                (inst.status === "pending" || inst.status === "partial" || inst.status === "overdue") && (
+                                                                    <button
+                                                                        onClick={() => {
+                                                                            setPayInstallmentId(inst.id);
+                                                                            setPaymentAmount(String(inst.amount - inst.paidAmount));
+                                                                        }}
+                                                                        className="px-3 py-1 bg-primary-600 text-white text-sm font-medium rounded-lg hover:bg-primary-700 transition"
+                                                                    >
+                                                                        Pay
+                                                                    </button>
+                                                                )}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+
+            {/* Payment Modal */}
+            {payInstallmentId && (
+                <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-xl p-6 w-full max-w-md">
+                        <h3 className="text-lg font-bold text-gray-900 mb-4">Record Payment</h3>
+                        <form onSubmit={handlePayInstallment} className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-1">Amount ($) *</label>
+                                <input
+                                    type="number"
+                                    min="0.01"
+                                    step="0.01"
+                                    value={paymentAmount}
+                                    onChange={(e) => setPaymentAmount(e.target.value)}
+                                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                                    required
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-1">Note</label>
+                                <input
+                                    type="text"
+                                    value={paymentNote}
+                                    onChange={(e) => setPaymentNote(e.target.value)}
+                                    placeholder="Optional note..."
+                                    className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                                />
+                            </div>
+                            <div className="flex justify-end gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setPayInstallmentId(null);
+                                        setPaymentAmount("");
+                                        setPaymentNote("");
+                                    }}
+                                    className="px-4 py-2 text-gray-600 font-semibold hover:bg-gray-100 rounded-lg transition"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={payInstallmentMutation.isPending}
+                                    className="px-6 py-2 bg-primary-600 text-white font-bold rounded-lg hover:bg-primary-700 transition disabled:opacity-50"
+                                >
+                                    {payInstallmentMutation.isPending ? "Processing..." : "Record Payment"}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

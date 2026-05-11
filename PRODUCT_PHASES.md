@@ -1199,6 +1199,233 @@ Validations:
 
 ---
 
+## Phase 6B — Payment Plans / Installments
+
+**Status:** ✅ COMPLETE
+
+### Goal
+
+Allow clinics to create patient payment plans with scheduled installments. Track payment progress, record installment payments, and link payments to the patient ledger (Phase 6A foundation).
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `server/modules/paymentPlan/index.ts` | **New** — Payment plan and installment models, four endpoints, in-memory storage with ledger integration for payments |
+| `server/index.ts` | Imported and mounted `paymentPlanRouter` at `/api/payment-plans` |
+| `client/src/lib/api.ts` | Added `api.paymentPlans.patient()`, `api.paymentPlans.create()`, `api.paymentPlans.updateStatus()`, `api.paymentPlans.payInstallment()` |
+| `client/src/pages/PatientFile.tsx` | Added `Payment Plans` tab with create form, plan list, installment table, payment modal, and cancellation |
+| `PRODUCT_PHASES.md` | This entry |
+
+### Payment Plan Model
+
+**PaymentPlan:**
+```typescript
+{
+  id: string,
+  patientId: string,
+  title: string,
+  description?: string,
+  totalAmount: number,
+  downPayment: number,
+  installmentCount: number,
+  installmentAmount: number,
+  startDate: string,
+  frequency: "weekly" | "biweekly" | "monthly",
+  status: "active" | "completed" | "cancelled",
+  createdAt: string,
+  updatedAt: string
+}
+```
+
+**PaymentInstallment:**
+```typescript
+{
+  id: string,
+  planId: string,
+  patientId: string,
+  installmentNumber: number,
+  dueDate: string,
+  amount: number,
+  paidAmount: number,
+  status: "pending" | "partial" | "paid" | "overdue" | "cancelled",
+  paidAt?: string | null
+}
+```
+
+### Installment Calculation Rules
+
+1. **Remaining amount** = `totalAmount - downPayment`
+2. **Base installment amount** = `remaining / installmentCount` (rounded to 2 decimals)
+3. **Last installment absorbs rounding** — ensures total installments exactly equal remaining amount
+4. **Due dates calculated from startDate** using frequency:
+   - `weekly`: +7 days per installment
+   - `biweekly`: +14 days per installment
+   - `monthly`: +1 month per installment
+
+### Installment Status Rules
+
+Derived dynamically when fetching plans:
+- `paid` — paidAmount >= amount
+- `partial` — paidAmount > 0 and < amount
+- `overdue` — dueDate < today and not fully paid
+- `cancelled` — plan status is cancelled
+- `pending` — otherwise
+
+### Endpoints Added
+
+#### `GET /api/payment-plans/patient/:patientId` (auth required)
+
+Returns patient's payment plans with installments and summary:
+
+```json
+{
+  "patientId": "p1",
+  "patientName": "Sara Al-Hassan",
+  "plans": [{
+    "plan": { /* PaymentPlan */ },
+    "installments": [ /* PaymentInstallment[] */ ],
+    "summary": {
+      "totalAmount": 1200,
+      "downPayment": 200,
+      "scheduledAmount": 1000,
+      "paidAmount": 400,
+      "remainingAmount": 600,
+      "nextDueDate": "2026-06-01T...",
+      "overdueAmount": 0,
+      "overdueCount": 0
+    }
+  }]
+}
+```
+
+#### `POST /api/payment-plans/patient/:patientId` (auth required)
+
+Creates payment plan and generates installments.
+
+**Validation:**
+- Patient must exist (404 if not)
+- Title required (400 if missing)
+- totalAmount > 0 (400 if invalid)
+- downPayment >= 0 and <= totalAmount (400 if invalid)
+- installmentCount >= 1 (400 if invalid)
+- Valid startDate and frequency (400 if invalid)
+
+**Response:**
+```json
+{
+  "success": true,
+  "plan": { /* created plan */ },
+  "installments": [ /* generated installments */ ],
+  "summary": { /* computed summary */ },
+  "note": "Payment plans are stored in-memory only..."
+}
+```
+
+#### `PUT /api/payment-plans/:planId/status` (auth required)
+
+Updates plan status to `active`, `completed`, or `cancelled`.
+
+- Cancelling marks all unpaid installments as `cancelled`
+- Does not delete financial history
+
+#### `POST /api/payment-plans/installments/:installmentId/payment` (auth required)
+
+Records payment against an installment.
+
+**Validation:**
+- Amount > 0 (400 if invalid)
+- Installment must exist (404 if not)
+- Plan must not be cancelled (400 if cancelled)
+- Payment amount cannot exceed remaining balance (400 if overpay)
+
+**Ledger Integration:**
+On successful payment, the endpoint creates a real ledger credit in the same Phase 6A in-memory ledger source and returns the created entry:
+```json
+{
+  "id": "adj-{uuid}",
+  "type": "payment",
+  "sourceType": "payment",
+  "sourceId": "{installmentPaymentId}",
+  "description": "Payment plan installment #N - {plan title}",
+  "credit": amount
+}
+```
+
+This credit is included by `GET /api/ledger/patient/:patientId` and `GET /api/ledger/patients` immediately after payment.
+
+### Desktop UI Summary
+
+**PatientFile → Payment Plans Tab:**
+- Header with count summary (active/completed/cancelled) and "Create Payment Plan" button
+- Create plan form (collapsible):
+  - Title, Description, Total Amount, Down Payment, Installments, Start Date, Frequency
+  - Live preview showing: Total, Down Payment, Remaining, Per Installment
+- Plan cards with:
+  - Title, description, status badge
+  - Payment progress: paid / total with remaining
+  - Summary bar: Total, Paid, Remaining, Next Due Date
+  - Overdue warning banner if applicable
+  - Expandable installments table
+  - Cancel button for active plans (with confirmation)
+- Installments table (when expanded):
+  - Number, Due Date, Amount, Paid, Status badge
+  - Pay button for pending/partial/overdue installments
+- Payment modal:
+  - Amount input (pre-filled with remaining balance)
+  - Optional note
+  - Submit/Cancel buttons
+- Empty state: "No payment plans yet" with 📅 icon
+
+### Ledger Integration Behavior
+
+**Financial Rule Enforced:** Payment plans do NOT create fake payments.
+
+- Payment plan = schedule/commitment only
+- Only actual recorded payments reduce ledger balance
+- Down payment is NOT automatically recorded as a payment (future enhancement)
+- Installment payments trigger ledger credit entry (Phase 6A foundation)
+
+**Integration Flow:**
+1. User records payment via Pay button
+2. Backend validates amount and installment remaining balance
+3. Backend updates installment paidAmount/status
+4. Backend creates real ledger credit entry (`sourceType: payment`, `sourceId: installmentPaymentId`)
+5. Frontend refetches both payment plans AND ledger
+6. Account Ledger tab reflects new balance
+
+### Mobile Decision
+
+**No mobile changes.**
+
+- `MobileBilling.tsx` not modified
+- Mobile continues showing only today's billing transactions
+- Payment plans accessible via desktop PatientFile only
+- Mobile payment plan UI deferred to future phase
+
+### Build Results
+
+| Command | Result |
+|---------|--------|
+| `npx tsc --noEmit` | ✅ exit 0 |
+| `npx vite build` | ✅ no errors |
+| `npx tsc -p tsconfig.server.json` | ✅ exit 0 |
+
+### Known Limitations
+
+- **Payment plans are in-memory only** — stored in `demoPaymentPlans`, `demoInstallments`, `demoInstallmentPayments` arrays; resets on server restart
+- **No database persistence** — production deployment needs DB tables
+- **No true payment idempotency key yet** — each payment call is treated as a new payment event; database phase should add transaction/payment IDs for safe retries
+- **No automatic payment reminders** — installment due dates not linked to reminder system
+- **No account statement PDF** — deferred to Phase 6C
+- **No aging buckets** — deferred to Phase 6D
+- **No mobile payment plan UI** — desktop only
+- **Down payment not auto-recorded** — must be recorded separately as payment
+- **No transaction safety** — in-memory storage lacks ACID guarantees
+- **No overpayment across installments** — each installment must be paid individually
+
+---
+
 ## Future Phases (Not Yet Defined)
 
 To be filled in by product owner.
