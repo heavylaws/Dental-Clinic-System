@@ -1026,6 +1026,179 @@ When `remindersEnabled: false`:
 
 ---
 
+## Phase 6A — Patient Account Ledger Foundation
+
+**Status:** ✅ COMPLETE
+
+### Goal
+
+Create a reliable patient-level financial ledger that shows a running balance across all visits, invoices, charges, and payments. This phase establishes the foundation for future payment plans (6B), account statements (6C), and aging buckets (6D).
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `server/modules/ledger/index.ts` | **New** — Ledger computation from existing billing/visit/payment data, three endpoints (`GET /patient/:id`, `GET /patients`, `POST /patient/:id/adjustment`), in-memory manual adjustments support |
+| `server/index.ts` | Imported and mounted `ledgerRouter` at `/api/ledger` |
+| `client/src/lib/api.ts` | Added `api.ledger.patient()`, `api.ledger.patients()`, `api.ledger.addAdjustment()` with full TypeScript types |
+| `client/src/pages/PatientFile.tsx` | Added `Account Ledger` tab with summary cards (charged, paid, balance, activity) and detailed ledger table with running balance |
+| `client/src/pages/Billing.tsx` | Added `Patient Account Balances` section showing all patients with financial activity, clickable rows to navigate to patient file |
+| `PRODUCT_PHASES.md` | This entry |
+
+### Ledger Computation Rules
+
+The ledger is computed from existing data sources (no database migration required):
+
+**Data Sources:**
+- `demoBillings` — invoice records linked to visits
+- `demoVisits` — visit records for patient linkage and context
+- `demoAdjustments` (in-memory) — manual adjustments posted via API
+
+**Entry Types:**
+- `charge` — debits that increase balance (from billing invoices)
+- `payment` — credits that decrease balance (from billing payments)
+- `adjustment` — manual corrections (debit or credit, from adjustment endpoint)
+
+**Ledger Entry Shape:**
+```typescript
+{
+  id: string,
+  patientId: string,
+  date: string,
+  type: "charge" | "payment" | "adjustment",
+  sourceType: "visit" | "invoice" | "payment" | "manual",
+  sourceId: string,
+  description: string,
+  debit: number,
+  credit: number,
+  balanceAfter: number,
+  status?: string
+}
+```
+
+**Running Balance Calculation:**
+1. Sort entries by date ascending (oldest first)
+2. On same date: charges before payments (deterministic ordering)
+3. Start with balance = 0
+4. For each entry: `balanceAfter = previousBalance + debit - credit`
+
+**Safe Numeric Parsing:**
+- All amounts parsed with `safeParseFloat()` helper
+- Non-numeric values default to 0
+- Missing/empty data does not crash
+
+### New Endpoints
+
+#### `GET /api/ledger/patient/:patientId` (auth required)
+
+Returns complete patient ledger:
+
+```json
+{
+  "patientId": "p1",
+  "patientName": "Sara Al-Hassan",
+  "totals": {
+    "charged": 280,
+    "paid": 200,
+    "balance": 80,
+    "invoiceCount": 3,
+    "paymentCount": 2,
+    "lastPaymentDate": "2026-05-10T...",
+    "lastChargeDate": "2026-05-05T..."
+  },
+  "entries": [ /* LedgerEntry[] sorted by date ascending */ ]
+}
+```
+
+Returns 404 if patient not found.
+
+#### `GET /api/ledger/patients` (auth required)
+
+Returns array of all patient balance summaries:
+
+```json
+[
+  {
+    "patientId": "p4",
+    "patientName": "Youssef Mansour",
+    "charged": 80,
+    "paid": 40,
+    "balance": 40,
+    "lastActivityDate": "2026-05-03T..."
+  }
+]
+```
+
+Sorted by balance descending (non-zero balances first, then by amount).
+
+#### `POST /api/ledger/patient/:patientId/adjustment` (auth required)
+
+Creates a manual adjustment entry:
+
+```json
+// Request body
+{
+  "amount": 25,
+  "description": "Courtesy adjustment",
+  "direction": "credit"  // or "debit"
+}
+
+// Response
+{
+  "success": true,
+  "adjustment": { /* created adjustment */ },
+  "note": "Adjustments are stored in-memory only..."
+}
+```
+
+Validations:
+- Patient must exist (404 if not)
+- Amount must be positive number > 0 (400 if invalid)
+- Direction must be "debit" or "credit" (400 if invalid)
+
+### Desktop UI Summary
+
+**Patient File → Account Ledger Tab:**
+- Summary cards: Total Charged, Total Paid, Current Balance (color-coded: rose if positive, emerald if zero), Activity stats
+- Ledger table: Date, Type (charge/payment/adjustment), Description, Debit, Credit, Running Balance
+- Visual distinction: orange for debits, emerald for credits
+- Empty state: "No financial activity yet." with 💰 icon
+
+**Billing Page → Patient Account Balances:**
+- Table showing all patients with financial activity
+- Columns: Patient, Charged, Paid, Balance (color-coded), Last Activity
+- Click row → navigate to patient file
+- Filtered to show only patients with charges or non-zero balance
+
+### Mobile Decision
+
+**No mobile changes.** 
+
+- `MobileBilling.tsx` was not modified
+- Mobile continues to show today's billing transactions only
+- Patient ledger is accessible via desktop PatientFile
+- Mobile ledger view deferred to future phase
+
+### Build Results
+
+| Command | Result |
+|---------|--------|
+| `npx tsc --noEmit` | ✅ exit 0 |
+| `npx vite build` | ✅ no errors |
+| `npx tsc -p tsconfig.server.json` | ✅ exit 0 |
+
+### Known Limitations
+
+- **Ledger is computed from existing billing/demo data** — no dedicated ledger table in database
+- **Manual adjustments are in-memory only** — `demoAdjustments` resets on server restart; production deployment should persist to DB
+- **Payment plans deferred to Phase 6B** — no installment tracking yet
+- **Account statement PDF deferred to Phase 6C** — no print/export yet
+- **Aging buckets deferred to Phase 6D** — no 30/60/90 day breakdown yet
+- **No mobile ledger view** — desktop PatientFile only
+- **Adjustment endpoint is admin-capable but not admin-restricted** — should add role check in production
+
+---
+
 ## Future Phases (Not Yet Defined)
 
 To be filled in by product owner.

@@ -596,4 +596,58 @@ export const api = {
                 body: JSON.stringify({ message, history }),
             }),
     },
+
+    // ─── Ledger (Phase 6A) ────────────────────────────────────────────
+
+    ledger: {
+        patient: (patientId: string) =>
+            request<{
+                patientId: string;
+                patientName: string;
+                totals: {
+                    charged: number;
+                    paid: number;
+                    balance: number;
+                    invoiceCount: number;
+                    paymentCount: number;
+                    lastPaymentDate: string | null;
+                    lastChargeDate: string | null;
+                };
+                entries: Array<{
+                    id: string;
+                    patientId: string;
+                    date: string;
+                    type: "charge" | "payment" | "adjustment";
+                    sourceType: "visit" | "invoice" | "payment" | "manual";
+                    sourceId: string;
+                    description: string;
+                    debit: number;
+                    credit: number;
+                    balanceAfter: number;
+                    status?: string;
+                }>;
+            }>(`/ledger/patient/${patientId}`),
+        patients: () =>
+            request<
+                Array<{
+                    patientId: string;
+                    patientName: string;
+                    charged: number;
+                    paid: number;
+                    balance: number;
+                    lastActivityDate: string | null;
+                }>
+            >("/ledger/patients"),
+        addAdjustment: (
+            patientId: string,
+            payload: { amount: number; description: string; direction: "debit" | "credit" }
+        ) =>
+            request<{ success: boolean; adjustment: any; note?: string }>(
+                `/ledger/patient/${patientId}/adjustment`,
+                {
+                    method: "POST",
+                    body: JSON.stringify(payload),
+                }
+            ),
+    },
 };

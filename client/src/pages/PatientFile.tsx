@@ -215,6 +215,12 @@ export default function PatientFile({ user }: PatientFileProps) {
                                         >
                                             📸 Photos
                                         </TabsTrigger>
+                                        <TabsTrigger
+                                            value="ledger"
+                                            className="px-4 py-2 rounded-lg data-[state=active]:bg-white data-[state=active]:text-primary-700 data-[state=active]:shadow-sm font-semibold text-gray-500"
+                                        >
+                                            💰 Account Ledger
+                                        </TabsTrigger>
                                     </TabsList>
                                 </div>
 
@@ -461,6 +467,10 @@ export default function PatientFile({ user }: PatientFileProps) {
 
                                 <TabsContent value="photos">
                                     <PhotoGallery patientId={id!} visitHistory={visitHistory} />
+                                </TabsContent>
+
+                                <TabsContent value="ledger">
+                                    <AccountLedger patientId={id!} />
                                 </TabsContent>
                             </Tabs>
                         </div>
@@ -1705,6 +1715,135 @@ function PatientEditDialog({
                         {updatePatientMutation.isPending ? "Saving..." : "Save Changes"}
                     </button>
                 </div>
+            </div>
+        </div>
+    );
+}
+
+// ─── Account Ledger Component (Phase 6A) ────────────────────────────
+
+function AccountLedger({ patientId }: { patientId: string }) {
+    const { data: ledger, isLoading, isError } = useQuery({
+        queryKey: ["ledger", "patient", patientId],
+        queryFn: () => api.ledger.patient(patientId),
+    });
+
+    if (isLoading) {
+        return (
+            <div className="text-center py-12">
+                <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary-600 mx-auto"></div>
+                <p className="text-gray-400 mt-4">Loading account ledger...</p>
+            </div>
+        );
+    }
+
+    if (isError) {
+        return (
+            <div className="text-center py-16 text-rose-600">
+                <p className="text-xl font-semibold">Unable to load account ledger.</p>
+                <p className="text-sm text-rose-400 mt-2">Please reload the patient file and try again.</p>
+            </div>
+        );
+    }
+
+    if (!ledger || ledger.entries.length === 0) {
+        return (
+            <div className="text-center py-16 text-gray-400">
+                <p className="text-5xl mb-4">💰</p>
+                <p className="text-xl">No financial activity yet.</p>
+            </div>
+        );
+    }
+
+    const { totals, entries } = ledger;
+
+    return (
+        <div className="space-y-6">
+            {/* Summary Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Total Charged</p>
+                    <p className="text-2xl font-bold text-gray-900">${totals.charged.toLocaleString()}</p>
+                </div>
+                <div className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Total Paid</p>
+                    <p className="text-2xl font-bold text-accent-600">${totals.paid.toLocaleString()}</p>
+                </div>
+                <div className={`rounded-xl p-4 border shadow-sm ${totals.balance > 0 ? 'bg-rose-50 border-rose-200' : 'bg-emerald-50 border-emerald-200'}`}>
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Current Balance</p>
+                    <p className={`text-2xl font-bold ${totals.balance > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                        ${totals.balance.toLocaleString()}
+                    </p>
+                </div>
+                <div className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm">
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Activity</p>
+                    <p className="text-sm text-gray-600">
+                        {totals.invoiceCount} invoices · {totals.paymentCount} payments
+                    </p>
+                    {totals.lastPaymentDate && (
+                        <p className="text-xs text-gray-400 mt-1">
+                            Last payment: {new Date(totals.lastPaymentDate).toLocaleDateString()}
+                        </p>
+                    )}
+                </div>
+            </div>
+
+            {/* Ledger Table */}
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                        <thead className="bg-gray-50 border-b border-gray-200">
+                            <tr>
+                                <th className="px-4 py-3 text-xs font-semibold text-gray-600">Date</th>
+                                <th className="px-4 py-3 text-xs font-semibold text-gray-600">Type</th>
+                                <th className="px-4 py-3 text-xs font-semibold text-gray-600">Description</th>
+                                <th className="px-4 py-3 text-xs font-semibold text-gray-600 text-right">Debit</th>
+                                <th className="px-4 py-3 text-xs font-semibold text-gray-600 text-right">Credit</th>
+                                <th className="px-4 py-3 text-xs font-semibold text-gray-600 text-right">Balance</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                            {entries.map((entry) => (
+                                <tr key={entry.id} className="hover:bg-gray-50 transition">
+                                    <td className="px-4 py-3 text-sm text-gray-600">
+                                        {new Date(entry.date).toLocaleDateString()}
+                                    </td>
+                                    <td className="px-4 py-3">
+                                        <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium
+                                            ${entry.type === 'charge' ? 'bg-orange-100 text-orange-700' :
+                                                entry.type === 'payment' ? 'bg-emerald-100 text-emerald-700' :
+                                                    'bg-gray-100 text-gray-700'}`}>
+                                            {entry.type === 'charge' ? '💰 Charge' :
+                                                entry.type === 'payment' ? '💳 Payment' :
+                                                    '⚖️ Adjustment'}
+                                        </span>
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-gray-700">
+                                        {entry.description}
+                                        {entry.status && (
+                                            <span className="ml-2 text-xs text-gray-400">({entry.status})</span>
+                                        )}
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-right font-medium text-orange-600">
+                                        {entry.debit > 0 ? `$${entry.debit.toLocaleString()}` : '—'}
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-right font-medium text-emerald-600">
+                                        {entry.credit > 0 ? `$${entry.credit.toLocaleString()}` : '—'}
+                                    </td>
+                                    <td className="px-4 py-3 text-sm text-right font-bold text-gray-900">
+                                        ${entry.balanceAfter.toLocaleString()}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            {/* Footer info */}
+            <div className="text-xs text-gray-400 text-center">
+                Ledger computed from {totals.invoiceCount} invoice(s) and {totals.paymentCount} payment(s)
+                {totals.lastChargeDate && ` · Last charge: ${new Date(totals.lastChargeDate).toLocaleDateString()}`}
             </div>
         </div>
     );

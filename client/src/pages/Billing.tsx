@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
+import { useNavigate } from "react-router-dom";
 
 function getGmtDateString() {
     return new Date().toISOString().split("T")[0];
@@ -9,8 +10,14 @@ function getGmtDateString() {
 export default function Billing() {
     const [startDate, setStartDate] = useState(getGmtDateString());
     const [endDate, setEndDate] = useState(getGmtDateString());
+    const navigate = useNavigate();
 
     const { data: user } = useQuery({ queryKey: ["auth", "me"], queryFn: api.auth.me });
+
+    const balancesQuery = useQuery({
+        queryKey: ["ledger", "patients"],
+        queryFn: () => api.ledger.patients(),
+    });
 
     const { data: billingData, isLoading } = useQuery({
         queryKey: ["billing", startDate, endDate],
@@ -80,6 +87,74 @@ export default function Billing() {
                     <p className="text-4xl font-extrabold text-danger-600">${Number(outstanding).toLocaleString()}</p>
                 </div>
             </div>
+
+            {/* ─── Patient Balance Summary ───────────────────────────── */}
+            {balancesQuery.isLoading ? (
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 mb-8 text-center text-gray-500">
+                    Loading patient account balances...
+                </div>
+            ) : balancesQuery.isError ? (
+                <div className="bg-white rounded-2xl shadow-sm border border-red-200 p-8 mb-8 text-center text-red-600">
+                    Unable to load patient account balances.
+                </div>
+            ) : balancesQuery.data && balancesQuery.data.length > 0 && (
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden mb-8">
+                    <div className="px-6 py-4 border-b border-gray-200">
+                        <h2 className="text-lg font-bold text-gray-900">Patient Account Balances</h2>
+                        <p className="text-sm text-gray-500">Click a patient to view their ledger</p>
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left">
+                            <thead className="bg-gray-50">
+                                <tr>
+                                    <th className="px-6 py-3 text-xs font-semibold text-gray-600">Patient</th>
+                                    <th className="px-6 py-3 text-xs font-semibold text-gray-600 text-right">Total Charged</th>
+                                    <th className="px-6 py-3 text-xs font-semibold text-gray-600 text-right">Total Paid</th>
+                                    <th className="px-6 py-3 text-xs font-semibold text-gray-600 text-right">Balance</th>
+                                    <th className="px-6 py-3 text-xs font-semibold text-gray-600">Last Activity</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                                {balancesQuery.isLoading ? (
+                                    <tr>
+                                        <td colSpan={5} className="px-6 py-8 text-center text-gray-400">Loading...</td>
+                                    </tr>
+                                ) : (
+                                    balancesQuery.data
+                                        .filter((p: any) => p.balance !== 0 || p.charged > 0) // Show patients with activity
+                                        .map((patient: any) => (
+                                            <tr
+                                                key={patient.patientId}
+                                                className="hover:bg-gray-50 transition cursor-pointer"
+                                                onClick={() => navigate(`/patient/${patient.patientId}`)}
+                                            >
+                                                <td className="px-6 py-4">
+                                                    <p className="font-bold text-gray-900">{patient.patientName}</p>
+                                                </td>
+                                                <td className="px-6 py-4 text-right font-medium text-gray-600">
+                                                    ${patient.charged.toLocaleString()}
+                                                </td>
+                                                <td className="px-6 py-4 text-right font-medium text-emerald-600">
+                                                    ${patient.paid.toLocaleString()}
+                                                </td>
+                                                <td className="px-6 py-4 text-right">
+                                                    <span className={`font-bold ${patient.balance > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                                                        ${patient.balance.toLocaleString()}
+                                                    </span>
+                                                </td>
+                                                <td className="px-6 py-4 text-sm text-gray-500">
+                                                    {patient.lastActivityDate
+                                                        ? new Date(patient.lastActivityDate).toLocaleDateString()
+                                                        : '—'}
+                                                </td>
+                                            </tr>
+                                        ))
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
 
             {/* ─── Transactions Table ─── */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
