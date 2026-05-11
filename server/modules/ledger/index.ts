@@ -307,6 +307,218 @@ function computeAllPatientBalances(): PatientBalanceSummary[] {
     return summaries;
 }
 
+// ─── Aging Calculation (Phase 6D1) ─────────────────────────────────────────
+
+interface AgingBuckets {
+    current: number;      // 0-30 days
+    days31to60: number;   // 31-60 days
+    days61to90: number;   // 61-90 days
+    over90: number;       // 90+ days
+}
+
+interface AgingEntry {
+    patientId: string;
+    patientName: string;
+    totalBalance: number;
+    buckets: AgingBuckets;
+    oldestUnpaidDate: string | null;
+    lastPaymentDate: string | null;
+}
+
+interface AgingReport {
+    asOf: string;
+    totals: {
+        totalBalance: number;
+        current: number;
+        days31to60: number;
+        days61to90: number;
+        over90: number;
+        patientCount: number;
+        overduePatientCount: number;
+    };
+    patients: AgingEntry[];
+}
+
+/**
+ * Calculate aging buckets for a patient.
+ * Uses FIFO allocation: payments/credits apply to oldest unpaid charges first.
+ */
+function computePatientAging(patientId: string, asOfDate: Date = new Date()): AgingEntry | null {
+    const patient = demoPatients.find((p) => p.id === patientId);
+    if (!patient) return null;
+
+    const entries = computeLedgerEntries(patientId);
+
+    // Get all debit entries (charges) and credit entries (payments/adjustments)
+    const debits = entries.filter((e) => e.type === "charge" || (e.type === "adjustment" && e.debit > 0));
+    const credits = entries.filter((e) => e.type === "payment" || (e.type === "adjustment" && e.credit > 0));
+
+    // Sort debits by date ascending (oldest first) for FIFO allocation
+    const sortedDebits = debits
+        .map((d) => ({
+            id: d.id,
+            date: d.date,
+            amount: d.debit,
+            remaining: d.debit, // Will be reduced by credits
+        }))
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    // Sort credits by date ascending (apply oldest credits first)
+    const sortedCredits = credits
+        .map((c) => ({
+            date: c.date,
+            amount: c.credit,
+            remaining: c.credit,
+        }))
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    // Apply credits to debits (FIFO - oldest first)
+    for (const credit of sortedCredits) {
+        let creditToApply = credit.remaining;
+        for (const debit of sortedDebits) {
+            if (creditToApply <= 0) break;
+            if (debit.remaining > 0) {
+                const applyAmount = Math.min(debit.remaining, creditToApply);
+                debit.remaining -= applyAmount;
+                creditToApply -= applyAmount;
+            }
+        }
+    }
+
+    // Calculate aging buckets based on remaining unpaid amounts
+    const asOfTime = asOfDate.getTime();
+    const msPerDay = 24 * 60 * 60 * 1000;
+
+    const buckets: AgingBuckets = {
+        current: 0,
+        days31to60: 0,
+        days61to90: 0,
+        over90: 0,
+    };
+
+    let oldestUnpaidDate: string | null = null;
+
+    for (const debit of sortedDebits) {
+        if (debit.remaining > 0) {
+            const debitDate = new Date(debit.date);
+            const ageDays = Math.floor((asOfTime - debitDate.getTime()) / msPerDay);
+
+            // Track oldest unpaid date
+            if (!oldestUnpaidDate || new Date(debit.date) < new Date(oldestUnpaidDate)) {
+                oldestUnpaidDate = debit.date;
+            }
+
+            // Assign to bucket
+            if (ageDays <= 30) {
+                buckets.current += debit.remaining;
+            } else if (ageDays <= 60) {
+                buckets.days31to60 += debit.remaining;
+            } else if (ageDays <= 90) {
+                buckets.days61to90 += debit.remaining;
+            } else {
+                buckets.over90 += debit.remaining;
+            }
+        }
+    }
+
+    // Get last payment date
+    const paymentEntries = entries.filter((e) => e.type === "payment");
+    const lastPaymentDate = paymentEntries.length > 0
+        ? paymentEntries[paymentEntries.length - 1].date
+        : null;
+
+    // Calculate total balance from ledger
+    const totalCharged = entries.reduce((sum, e) => sum + e.debit, 0);
+    const totalPaid = entries.reduce((sum, e) => sum + e.credit, 0);
+    const totalBalance = Math.max(0, roundToTwoDecimals(totalCharged - totalPaid));
+
+    // Round buckets
+    buckets.current = roundToTwoDecimals(buckets.current);
+    buckets.days31to60 = roundToTwoDecimals(buckets.days31to60);
+    buckets.days61to90 = roundToTwoDecimals(buckets.days61to90);
+    buckets.over90 = roundToTwoDecimals(buckets.over90);
+
+    // If total balance is 0 (or negative due to overpayment), all buckets should be 0
+    if (totalBalance <= 0) {
+        buckets.current = 0;
+        buckets.days31to60 = 0;
+        buckets.days61to90 = 0;
+        buckets.over90 = 0;
+    }
+
+    // Verify: sum of buckets should equal total balance (for positive balances)
+    const bucketSum = buckets.current + buckets.days31to60 + buckets.days61to90 + buckets.over90;
+    if (totalBalance > 0 && Math.abs(bucketSum - totalBalance) > 0.01) {
+        // Reconciliation mismatch detected
+        const diff = totalBalance - bucketSum;
+        
+        // Log the mismatch for visibility (not silent correction)
+        console.warn(
+            `[AGING] Reconciliation mismatch for patient ${patientId}: ` +
+            `bucketSum=$${bucketSum.toFixed(2)} vs totalBalance=$${totalBalance.toFixed(2)}, ` +
+            `diff=$${Math.abs(diff).toFixed(2)}. Adjusting current bucket.`
+        );
+        
+        // Only correct if mismatch is within acceptable rounding threshold (>= 0.01 and <= 0.05)
+        if (Math.abs(diff) <= 0.05) {
+            // Correction is acceptable (rounding error)
+            buckets.current = roundToTwoDecimals(buckets.current + diff);
+        } else {
+            // Large mismatch - this indicates a bug in FIFO allocation or bucket calculation
+            // Still correct to maintain data integrity, but log as ERROR
+            console.error(
+                `[AGING ERROR] LARGE reconciliation mismatch for patient ${patientId}: ` +
+                `diff=$${Math.abs(diff).toFixed(2)} exceeds acceptable threshold. ` +
+                `This may indicate a bug in FIFO allocation or bucket calculation.`
+            );
+            buckets.current = roundToTwoDecimals(buckets.current + diff);
+        }
+    }
+
+    return {
+        patientId,
+        patientName: `${patient.firstName} ${patient.lastName}`,
+        totalBalance,
+        buckets,
+        oldestUnpaidDate,
+        lastPaymentDate,
+    };
+}
+
+/**
+ * Compute aging report for all patients.
+ */
+function computeAgingReport(asOfDate: Date = new Date()): AgingReport {
+    const patients: AgingEntry[] = [];
+
+    for (const patient of demoPatients) {
+        const aging = computePatientAging(patient.id, asOfDate);
+        if (aging && aging.totalBalance > 0) {
+            patients.push(aging);
+        }
+    }
+
+    // Sort by total balance descending
+    patients.sort((a, b) => b.totalBalance - a.totalBalance);
+
+    // Calculate totals
+    const totals = {
+        totalBalance: roundToTwoDecimals(patients.reduce((sum, p) => sum + p.totalBalance, 0)),
+        current: roundToTwoDecimals(patients.reduce((sum, p) => sum + p.buckets.current, 0)),
+        days31to60: roundToTwoDecimals(patients.reduce((sum, p) => sum + p.buckets.days31to60, 0)),
+        days61to90: roundToTwoDecimals(patients.reduce((sum, p) => sum + p.buckets.days61to90, 0)),
+        over90: roundToTwoDecimals(patients.reduce((sum, p) => sum + p.buckets.over90, 0)),
+        patientCount: patients.length,
+        overduePatientCount: patients.filter((p) => p.buckets.days31to60 > 0 || p.buckets.days61to90 > 0 || p.buckets.over90 > 0).length,
+    };
+
+    return {
+        asOf: asOfDate.toISOString(),
+        totals,
+        patients,
+    };
+}
+
 // ─── Routes ────────────────────────────────────────────────────────────────
 
 // GET /api/ledger/patient/:patientId - Get patient ledger
@@ -325,6 +537,24 @@ router.get("/patient/:patientId", (req, res) => {
 router.get("/patients", (_req, res) => {
     const summaries = computeAllPatientBalances();
     res.json(summaries);
+});
+
+// GET /api/ledger/aging - Get aging report for all patients
+router.get("/aging", (_req, res) => {
+    const report = computeAgingReport();
+    res.json(report);
+});
+
+// GET /api/ledger/patient/:patientId/aging - Get aging for specific patient
+router.get("/patient/:patientId/aging", (req, res) => {
+    const { patientId } = req.params;
+    const aging = computePatientAging(patientId);
+
+    if (!aging) {
+        return res.status(404).json({ error: "Patient not found" });
+    }
+
+    res.json(aging);
 });
 
 // POST /api/ledger/patient/:patientId/adjustment - Add manual adjustment

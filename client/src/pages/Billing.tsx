@@ -25,6 +25,12 @@ export default function Billing() {
         refetchInterval: 30000,
     });
 
+    const agingQuery = useQuery({
+        queryKey: ["ledger", "aging"],
+        queryFn: () => api.ledger.aging(),
+        refetchInterval: 60000,
+    });
+
     if (isLoading && !billingData) {
         return (
             <div className="flex justify-center p-12">
@@ -88,7 +94,120 @@ export default function Billing() {
                 </div>
             </div>
 
-            {/* ─── Patient Balance Summary ───────────────────────────── */}
+            {/* ─── Aging Summary (Phase 6D1) ───────────────────────────── */}
+            {agingQuery.isLoading ? (
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 mb-8">
+                    <div className="flex items-center gap-3 text-gray-500">
+                        <div className="animate-spin h-5 w-5 border-b-2 border-gray-600"></div>
+                        <span>Loading aging report...</span>
+                    </div>
+                </div>
+            ) : agingQuery.isError ? (
+                <div className="bg-white rounded-2xl shadow-sm border border-red-200 p-6 mb-8 text-red-600">
+                    Unable to load aging report.
+                </div>
+            ) : agingQuery.data && agingQuery.data.patients.length > 0 && (
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 mb-8">
+                    <div className="flex items-center justify-between mb-4">
+                        <div>
+                            <h2 className="text-lg font-bold text-gray-900">Aging Summary</h2>
+                            <p className="text-sm text-gray-500">
+                                As of {new Date(agingQuery.data.asOf).toLocaleString()} · {agingQuery.data.totals.patientCount} patients · {agingQuery.data.totals.overduePatientCount} overdue
+                            </p>
+                        </div>
+                        <div className="text-right">
+                            <p className="text-sm text-gray-500">Total Outstanding</p>
+                            <p className="text-2xl font-extrabold text-gray-900">${agingQuery.data.totals.totalBalance.toLocaleString()}</p>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="bg-emerald-50 rounded-xl p-4 border border-emerald-200">
+                            <p className="text-xs font-semibold text-emerald-600 uppercase mb-1">0–30 Days</p>
+                            <p className="text-xl font-bold text-emerald-700">${agingQuery.data.totals.current.toLocaleString()}</p>
+                        </div>
+                        <div className="bg-amber-50 rounded-xl p-4 border border-amber-200">
+                            <p className="text-xs font-semibold text-amber-600 uppercase mb-1">31–60 Days</p>
+                            <p className="text-xl font-bold text-amber-700">${agingQuery.data.totals.days31to60.toLocaleString()}</p>
+                        </div>
+                        <div className="bg-orange-50 rounded-xl p-4 border border-orange-200">
+                            <p className="text-xs font-semibold text-orange-600 uppercase mb-1">61–90 Days</p>
+                            <p className="text-xl font-bold text-orange-700">${agingQuery.data.totals.days61to90.toLocaleString()}</p>
+                        </div>
+                        <div className="bg-rose-50 rounded-xl p-4 border border-rose-200">
+                            <p className="text-xs font-semibold text-rose-600 uppercase mb-1">90+ Days</p>
+                            <p className="text-xl font-bold text-rose-700">${agingQuery.data.totals.over90.toLocaleString()}</p>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* ─── Aging Patient Table (Phase 6D1) ─────────────────────── */}
+            {agingQuery.data && agingQuery.data.patients.length > 0 && (
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden mb-8">
+                    <div className="px-6 py-4 border-b border-gray-200">
+                        <h2 className="text-lg font-bold text-gray-900">Aging by Patient</h2>
+                        <p className="text-sm text-gray-500">Click a patient to view their account ledger</p>
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left">
+                            <thead className="bg-gray-50">
+                                <tr>
+                                    <th className="px-6 py-3 text-xs font-semibold text-gray-600">Patient</th>
+                                    <th className="px-6 py-3 text-xs font-semibold text-gray-600 text-right">Total Balance</th>
+                                    <th className="px-6 py-3 text-xs font-semibold text-gray-600 text-right">0–30</th>
+                                    <th className="px-6 py-3 text-xs font-semibold text-gray-600 text-right">31–60</th>
+                                    <th className="px-6 py-3 text-xs font-semibold text-gray-600 text-right">61–90</th>
+                                    <th className="px-6 py-3 text-xs font-semibold text-gray-600 text-right">90+</th>
+                                    <th className="px-6 py-3 text-xs font-semibold text-gray-600">Oldest Unpaid</th>
+                                    <th className="px-6 py-3 text-xs font-semibold text-gray-600">Last Payment</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                                {agingQuery.data.patients.map((patient: any) => (
+                                    <tr
+                                        key={patient.patientId}
+                                        className="hover:bg-gray-50 transition cursor-pointer"
+                                        onClick={() => navigate(`/patient/${patient.patientId}`)}
+                                    >
+                                        <td className="px-6 py-4">
+                                            <p className="font-bold text-gray-900">{patient.patientName}</p>
+                                        </td>
+                                        <td className="px-6 py-4 text-right">
+                                            <span className={`font-bold ${patient.totalBalance > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                                                ${patient.totalBalance.toLocaleString()}
+                                            </span>
+                                        </td>
+                                        <td className="px-6 py-4 text-right text-emerald-600">
+                                            {patient.buckets.current > 0 ? `$${patient.buckets.current.toLocaleString()}` : '—'}
+                                        </td>
+                                        <td className="px-6 py-4 text-right text-amber-600">
+                                            {patient.buckets.days31to60 > 0 ? `$${patient.buckets.days31to60.toLocaleString()}` : '—'}
+                                        </td>
+                                        <td className="px-6 py-4 text-right text-orange-600">
+                                            {patient.buckets.days61to90 > 0 ? `$${patient.buckets.days61to90.toLocaleString()}` : '—'}
+                                        </td>
+                                        <td className={`px-6 py-4 text-right font-medium ${patient.buckets.over90 > 0 ? 'text-rose-600 bg-rose-50' : ''}`}>
+                                            {patient.buckets.over90 > 0 ? `$${patient.buckets.over90.toLocaleString()}` : '—'}
+                                        </td>
+                                        <td className="px-6 py-4 text-sm text-gray-500">
+                                            {patient.oldestUnpaidDate
+                                                ? new Date(patient.oldestUnpaidDate).toLocaleDateString()
+                                                : '—'}
+                                        </td>
+                                        <td className="px-6 py-4 text-sm text-gray-500">
+                                            {patient.lastPaymentDate
+                                                ? new Date(patient.lastPaymentDate).toLocaleDateString()
+                                                : '—'}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
+
+            {/* ─── Patient Account Balances ───────────────────────────── */}
             {balancesQuery.isLoading ? (
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 mb-8 text-center text-gray-500">
                     Loading patient account balances...

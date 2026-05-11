@@ -747,6 +747,47 @@ export const api = {
                 }>;
                 count: number;
             }>(`/ledger/patient/${patientId}/statement/share-logs`),
+        // ─── Aging (Phase 6D1) ──────────────────────────────────────────────
+        aging: () =>
+            request<{
+                asOf: string;
+                totals: {
+                    totalBalance: number;
+                    current: number;
+                    days31to60: number;
+                    days61to90: number;
+                    over90: number;
+                    patientCount: number;
+                    overduePatientCount: number;
+                };
+                patients: Array<{
+                    patientId: string;
+                    patientName: string;
+                    totalBalance: number;
+                    buckets: {
+                        current: number;
+                        days31to60: number;
+                        days61to90: number;
+                        over90: number;
+                    };
+                    oldestUnpaidDate: string | null;
+                    lastPaymentDate: string | null;
+                }>;
+            }>("/ledger/aging"),
+        patientAging: (patientId: string) =>
+            request<{
+                patientId: string;
+                patientName: string;
+                totalBalance: number;
+                buckets: {
+                    current: number;
+                    days31to60: number;
+                    days61to90: number;
+                    over90: number;
+                };
+                oldestUnpaidDate: string | null;
+                lastPaymentDate: string | null;
+            }>(`/ledger/patient/${patientId}/aging`),
     },
 
     // ─── Payment Plans (Phase 6B) ─────────────────────────────────────

@@ -1680,8 +1680,147 @@ Allow staff to share or send patient account statements via WhatsApp or email. T
 - **Email is not_configured** — no SMTP configured in this system
 - **Share logs are in-memory only** — reset on server restart
 - **Mobile sharing UI deferred** — desktop PatientFile only
-- **Aging buckets deferred** to Phase 6D
+- **Aging buckets deferred** to Phase 6D1
 - **Clinic name hardcoded** as "Dental Clinic" in messages
+
+---
+
+## Phase 6D1 — Aging Calculation + Billing UI
+
+**Status:** ✅ COMPLETE
+
+### Goal
+
+Calculate patient unpaid balances by age and expose them in the Billing page. Aging buckets help clinics identify overdue accounts and prioritize collection efforts.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `server/modules/ledger/index.ts` | Added `AgingBuckets`, `AgingEntry`, `AgingReport` interfaces; `computePatientAging()` and `computeAgingReport()` helpers; `GET /ledger/aging` and `GET /ledger/patient/:patientId/aging` endpoints |
+| `client/src/lib/api.ts` | Added `api.ledger.aging()` and `api.ledger.patientAging()` methods |
+| `client/src/pages/Billing.tsx` | Added aging summary section with bucket cards; added aging patient table with columns for buckets, oldest unpaid date, last payment |
+| `PRODUCT_PHASES.md` | This entry |
+
+### Aging Buckets
+
+| Bucket | Range |
+|--------|-------|
+| `current` | 0–30 days |
+| `days31to60` | 31–60 days |
+| `days61to90` | 61–90 days |
+| `over90` | 90+ days |
+
+### Aging Calculation Rules
+
+**Source of Truth:**
+- Uses `computeLedgerEntries()` from Phase 6A (ledger/billing data).
+- As-of date defaults to current date; calculations reflect "today".
+
+**FIFO Payment Allocation:**
+- Payments and credit adjustments are applied to oldest unpaid charges first.
+- Debit adjustments increase balance in their respective age bucket based on date.
+- No mutation of financial data during calculation.
+
+**Reconciliation:**
+- `sum(buckets) = totalBalance` for each patient.
+- `totalBalance = ledger balance` (max of 0; negative balances show as 0).
+- All values rounded to 2 decimals.
+- If reconciliation mismatch detected (>$0.01):
+  - Mismatch ≤ $0.05: logged as WARN, current bucket adjusted to match (acceptable rounding correction).
+  - Mismatch > $0.05: logged as ERROR (indicates potential bug in FIFO allocation), current bucket still adjusted to maintain data integrity.
+  - **Large mismatches are always visible in server logs** — never silently hidden.
+
+**Overpayment Handling:**
+- Patients with negative/credit balance show `totalBalance: 0` and all buckets as 0.
+- No negative aging buckets displayed.
+
+**Aging Entry Fields:**
+```typescript
+{
+  patientId: string;
+  patientName: string;
+  totalBalance: number;
+  buckets: { current, days31to60, days61to90, over90 };
+  oldestUnpaidDate: string | null;  // Date of oldest unpaid charge
+  lastPaymentDate: string | null;   // Date of most recent payment
+}
+```
+
+### Aging Endpoints
+
+**`GET /api/ledger/aging`**
+
+Returns aging report for all patients with positive balances.
+
+**Response:**
+```json
+{
+  "asOf": "2026-05-12T00:00:00.000Z",
+  "totals": {
+    "totalBalance": 15000,
+    "current": 8000,
+    "days31to60": 4000,
+    "days61to90": 2000,
+    "over90": 1000,
+    "patientCount": 5,
+    "overduePatientCount": 3
+  },
+  "patients": [ /* sorted by totalBalance desc */ ]
+}
+```
+
+**`GET /api/ledger/patient/:patientId/aging`**
+
+Returns aging for a single patient.
+
+**Response:** `AgingEntry` object or 404.
+
+### Billing UI Changes
+
+**Aging Summary Section (new):**
+- Positioned after billing summary, before patient tables.
+- Shows as-of date, patient count, overdue patient count.
+- Four colored bucket cards: 0–30 (green), 31–60 (amber), 61–90 (orange), 90+ (red).
+- Loading, error, and empty states handled.
+
+**Aging Patient Table (new):**
+- Full-width table with horizontal scroll on mobile.
+- Columns: Patient, Total Balance, 0–30, 31–60, 61–90, 90+, Oldest Unpaid, Last Payment.
+- 90+ column highlighted with rose background when non-zero.
+- Click row → navigate to `/patient/:id`.
+- Sorted by total balance descending (server-side).
+
+**Preserved Features:**
+- Date filter still controls billing transaction table.
+- Patient Account Balances table remains.
+- Export CSV button remains.
+
+### Mobile Decision
+
+**No mobile changes.**
+
+- Mobile aging UI deferred.
+- Mobile billing must still compile and run.
+
+### Build Results
+
+| Command | Result |
+|---------|--------|
+| `npx tsc --noEmit` | ✅ exit 0 |
+| `npx vite build` | ✅ no errors |
+| `npx tsc -p tsconfig.server.json` | ✅ exit 0 |
+
+### Known Limitations
+
+- **Payment allocation is oldest-charge-first** unless real allocation data exists.
+- **Aging computed from demo/in-memory data** — recalculated on server restart.
+- **No persistent allocation records** — production should store payment-to-charge links.
+- **Dashboard integration deferred** to Phase 6D2.
+- **Reports integration deferred** to Phase 6D2.
+- **Mobile aging UI deferred** — desktop Billing only.
+- **No PDF export** for aging report.
+- **Clinic name hardcoded** in messaging.
 
 ---
 
