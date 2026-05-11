@@ -451,4 +451,44 @@ router.post("/installments/:installmentId/payment", (req, res) => {
     });
 });
 
+// ─── Export for Statement Integration (Phase 6C1) ─────────────────────────
+
+export function getPatientPaymentPlanSummaries(patientId: string): Array<{
+    planId: string;
+    title: string;
+    status: string;
+    totalAmount: number;
+    paidAmount: number;
+    remainingAmount: number;
+    nextDueDate: string | null;
+    overdueAmount: number;
+    overdueCount: number;
+}> {
+    const plans = demoPaymentPlans.filter((p) => p.patientId === patientId);
+
+    return plans.map((plan) => {
+        const installments = demoInstallments.filter((i) => i.planId === plan.id);
+
+        // Update installment statuses
+        const updatedInstallments = installments.map((inst) => ({
+            ...inst,
+            status: getInstallmentStatus(inst, plan.status),
+        }));
+
+        const summary = getPlanSummary(plan, updatedInstallments);
+
+        return {
+            planId: plan.id,
+            title: plan.title,
+            status: plan.status,
+            totalAmount: plan.totalAmount,
+            paidAmount: summary.paidAmount,
+            remainingAmount: summary.remainingAmount,
+            nextDueDate: summary.nextDueDate,
+            overdueAmount: summary.overdueAmount,
+            overdueCount: summary.overdueCount,
+        };
+    });
+}
+
 export { router as paymentPlanRouter };

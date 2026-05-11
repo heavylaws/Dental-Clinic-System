@@ -1426,6 +1426,128 @@ This credit is included by `GET /api/ledger/patient/:patientId` and `GET /api/le
 
 ---
 
+## Phase 6C1 — Account Statement Data + Printable Statement
+
+**Status:** ✅ COMPLETE
+
+### Goal
+
+Generate professional patient account statements from existing ledger (6A) and payment plan (6B) data. Provide both on-screen viewing and printable/PDF-ready output without adding heavy PDF libraries.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `server/modules/ledger/index.ts` | Added `GET /patient/:patientId/statement` endpoint with date range filtering, opening/closing balance calculation, and payment plan integration |
+| `server/modules/paymentPlan/index.ts` | Exported `getPatientPaymentPlanSummaries()` helper for statement integration |
+| `client/src/lib/api.ts` | Added `api.ledger.statement(patientId, params?)` method |
+| `client/src/pages/PatientFile.tsx` | Added statement modal to Account Ledger tab with date controls, summary cards, transaction table, payment plans, and print/PDF functionality |
+| `PRODUCT_PHASES.md` | This entry |
+
+### Statement Endpoint
+
+**`GET /api/ledger/patient/:patientId/statement?from=YYYY-MM-DD&to=YYYY-MM-DD`**
+
+**Date Range Rules:**
+- Omitted dates → all available ledger history
+- `from` only → from date through today
+- `to` only → earliest history through to date
+- Both supplied → inclusive range
+- Invalid dates → HTTP 400
+
+**Response Shape:**
+```json
+{
+  "patient": {
+    "id": "p1",
+    "name": "Sara Al-Hassan",
+    "phone": "+1234567890",
+    "email": null
+  },
+  "statement": {
+    "from": "2026-01-01",
+    "to": "2026-05-31",
+    "generatedAt": "2026-05-11T...",
+    "openingBalance": 0,
+    "totalCharges": 280,
+    "totalPayments": 200,
+    "totalAdjustments": 0,
+    "closingBalance": 80
+  },
+  "entries": [ /* LedgerEntry[] within date range */ ],
+  "paymentPlans": [ /* Payment plan summaries */ ]
+}
+```
+
+### Opening/Closing Balance Rules
+
+- **Opening Balance** = sum of all entries before `from` date
+- **Total Charges** = sum of debits in range (charges)
+- **Total Payments** = sum of credits in range (payments)
+- **Total Adjustments** = sum of adjustment amounts in range (debits - credits)
+- **Closing Balance** = `openingBalance + totalCharges - totalPayments + totalAdjustments`
+- All amounts rounded to 2 decimals
+- Closing balance must match ledger's running balance at end of range
+
+### Payment Plan Summary Behavior
+
+- All patient's payment plans included (active, completed, cancelled)
+- Each plan shows: title, status, total, paid, remaining, next due, overdue count/amount
+- Overdue indicators displayed in statement
+- No payment plan state mutated during statement generation
+
+### Desktop UI Summary
+
+**Account Ledger Tab → Generate Statement Button:**
+- Opens full-screen modal with statement controls and display
+- Date range inputs (From/To) with Generate button
+- Print/Save as PDF button (appears after generation)
+
+**Statement Display:**
+- Patient info header (name, ID, phone, email)
+- Period and generation timestamp
+- 5 summary cards: Opening Balance, Charges (+), Payments (-), Adjustments, Closing Balance
+- Transaction table with date, type badge, description, debit, credit, running balance
+- Payment plans section (if applicable) with status, totals, and overdue indicators
+
+**Print/PDF Behavior:**
+- Opens clean print window with professional styling
+- Clinic header with statement period
+- Summary grid with color-coded amounts
+- Transaction table with type badges
+- Payment plans table included
+- Auto-triggers browser print dialog (`window.print()`)
+- User can "Save as PDF" via browser print dialog
+- Print-specific CSS removes navigation/buttons
+
+### Mobile Decision
+
+**No mobile changes.**
+
+- Mobile statement view deferred
+- Mobile billing continues unchanged
+- Statement generation desktop-only in Phase 6C1
+
+### Build Results
+
+| Command | Result |
+|---------|--------|
+| `npx tsc --noEmit` | ✅ exit 0 |
+| `npx vite build` | ✅ no errors |
+| `npx tsc -p tsconfig.server.json` | ✅ exit 0 |
+
+### Known Limitations
+
+- **WhatsApp/email sending deferred** to Phase 6C2
+- **Browser print/save-as-PDF only** — no server-side PDF generator (jsPDF/html2canvas not added)
+- **No mobile statement UI** — desktop PatientFile only
+- **Aging buckets deferred** to Phase 6D
+- **In-memory data** — statements reset on server restart
+- **No print template customization** — clinic name hardcoded as "Dental Clinic"
+- **Production needs persistent tables** for ledger and payment plans
+
+---
+
 ## Future Phases (Not Yet Defined)
 
 To be filled in by product owner.

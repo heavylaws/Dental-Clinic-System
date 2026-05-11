@@ -113,6 +113,30 @@ function safeParseFloat(value: string | number | null | undefined): number {
     return isNaN(parsed) ? 0 : parsed;
 }
 
+function roundToTwoDecimals(num: number): number {
+    return Math.round(num * 100) / 100;
+}
+
+function parseDateOnly(input: string): Date | null {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(input);
+    if (!match) return null;
+
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const parsed = new Date(Date.UTC(year, month - 1, day));
+
+    if (
+        parsed.getUTCFullYear() !== year ||
+        parsed.getUTCMonth() !== month - 1 ||
+        parsed.getUTCDate() !== day
+    ) {
+        return null;
+    }
+
+    return parsed;
+}
+
 function getPatientVisits(patientId: string): any[] {
     return getLiveDemoVisits().filter((v) => v.patientId === patientId);
 }
@@ -348,6 +372,176 @@ router.post("/patient/:patientId/adjustment", (req, res) => {
         },
         note: "Adjustments are stored in-memory only and will reset on server restart",
     });
+});
+
+// ─── Statement Types ────────────────────────────────────────────────────────
+
+interface StatementEntry extends LedgerEntry {
+    // Same as LedgerEntry for statement
+}
+
+interface StatementPaymentPlanSummary {
+    planId: string;
+    title: string;
+    status: string;
+    totalAmount: number;
+    paidAmount: number;
+    remainingAmount: number;
+    nextDueDate: string | null;
+    overdueAmount: number;
+    overdueCount: number;
+}
+
+interface PatientStatement {
+    patient: {
+        id: string;
+        name: string;
+        phone?: string | null;
+        email?: string | null;
+    };
+    statement: {
+        from: string;
+        to: string;
+        generatedAt: string;
+        openingBalance: number;
+        totalCharges: number;
+        totalPayments: number;
+        totalAdjustments: number;
+        closingBalance: number;
+    };
+    entries: StatementEntry[];
+    paymentPlans: StatementPaymentPlanSummary[];
+}
+
+// GET /api/ledger/patient/:patientId/statement - Get patient account statement
+router.get("/patient/:patientId/statement", async (req, res) => {
+    const { patientId } = req.params;
+    const { from, to } = req.query;
+
+    // Validate patient exists
+    const patient = demoPatients.find((p) => p.id === patientId);
+    if (!patient) {
+        return res.status(404).json({ error: "Patient not found" });
+    }
+
+    // Parse and validate dates
+    const now = new Date();
+    let fromDate: Date | null = null;
+    let toDate: Date | null = null;
+
+    if (from && typeof from === "string") {
+        const parsedFrom = parseDateOnly(from);
+        if (!parsedFrom) {
+            return res.status(400).json({ error: "Invalid from date" });
+        }
+        parsedFrom.setUTCHours(0, 0, 0, 0);
+        fromDate = parsedFrom;
+    }
+
+    if (to && typeof to === "string") {
+        const parsedTo = parseDateOnly(to);
+        if (!parsedTo) {
+            return res.status(400).json({ error: "Invalid to date" });
+        }
+        // Set to end of day (UTC) for inclusive filtering.
+        parsedTo.setUTCHours(23, 59, 59, 999);
+        toDate = parsedTo;
+    }
+
+    if (fromDate && toDate && fromDate > toDate) {
+        return res.status(400).json({ error: "'from' date cannot be after 'to' date" });
+    }
+
+    // Get all ledger entries
+    const allEntries = computeLedgerEntries(patientId);
+
+    // Determine date range
+    const earliestEntry = allEntries.length > 0 ? allEntries[0] : null;
+
+    const effectiveFromDate = fromDate || (earliestEntry ? new Date(earliestEntry.date) : new Date("2000-01-01"));
+    const effectiveToDate = toDate || now;
+
+    // Calculate opening balance (balance before from date)
+    let openingBalance = 0;
+    for (const entry of allEntries) {
+        const entryDate = new Date(entry.date);
+        if (entryDate < effectiveFromDate) {
+            openingBalance += entry.debit - entry.credit;
+        }
+    }
+    openingBalance = roundToTwoDecimals(openingBalance);
+
+    // Filter entries within date range
+    const statementEntries: StatementEntry[] = [];
+    let totalCharges = 0;
+    let totalPayments = 0;
+    let totalAdjustments = 0;
+
+    for (const entry of allEntries) {
+        const entryDate = new Date(entry.date);
+        if (entryDate >= effectiveFromDate && entryDate <= effectiveToDate) {
+            statementEntries.push(entry);
+
+            // Categorize amounts
+            if (entry.type === "charge") {
+                totalCharges += entry.debit;
+            } else if (entry.type === "payment") {
+                totalPayments += entry.credit;
+            } else if (entry.type === "adjustment") {
+                totalAdjustments += entry.debit - entry.credit;
+            }
+        }
+    }
+
+    totalCharges = roundToTwoDecimals(totalCharges);
+    totalPayments = roundToTwoDecimals(totalPayments);
+    totalAdjustments = roundToTwoDecimals(totalAdjustments);
+
+    // Calculate closing balance. Prefer ledger running balance for exact reconciliation when entries exist.
+    const rangeDelta = roundToTwoDecimals(totalCharges - totalPayments + totalAdjustments);
+    const computedClosing = roundToTwoDecimals(openingBalance + rangeDelta);
+    const lastEntryBalance =
+        statementEntries.length > 0
+            ? roundToTwoDecimals(statementEntries[statementEntries.length - 1].balanceAfter)
+            : null;
+    const closingBalance = lastEntryBalance ?? computedClosing;
+
+    // Get payment plan summaries
+    // Import payment plan data dynamically to avoid circular dependency
+    let paymentPlanSummaries: StatementPaymentPlanSummary[] = [];
+    try {
+        const paymentPlanModule = await import("../paymentPlan/index.js");
+        const { getPatientPaymentPlanSummaries } = paymentPlanModule;
+        if (getPatientPaymentPlanSummaries) {
+            paymentPlanSummaries = getPatientPaymentPlanSummaries(patientId);
+        }
+    } catch {
+        // Payment plans module not available or no data
+        paymentPlanSummaries = [];
+    }
+
+    const statement: PatientStatement = {
+        patient: {
+            id: patient.id,
+            name: `${patient.firstName} ${patient.lastName}`,
+            phone: patient.phone || null,
+            email: patient.email || null,
+        },
+        statement: {
+            from: effectiveFromDate.toISOString().split("T")[0],
+            to: effectiveToDate.toISOString().split("T")[0],
+            generatedAt: now.toISOString(),
+            openingBalance: Number.isFinite(openingBalance) ? openingBalance : 0,
+            totalCharges: Number.isFinite(totalCharges) ? totalCharges : 0,
+            totalPayments: Number.isFinite(totalPayments) ? totalPayments : 0,
+            totalAdjustments: Number.isFinite(totalAdjustments) ? totalAdjustments : 0,
+            closingBalance: Number.isFinite(closingBalance) ? closingBalance : 0,
+        },
+        entries: statementEntries,
+        paymentPlans: paymentPlanSummaries,
+    };
+
+    res.json(statement);
 });
 
 export { router as ledgerRouter };

@@ -649,6 +649,53 @@ export const api = {
                     body: JSON.stringify(payload),
                 }
             ),
+        statement: (patientId: string, params?: { from?: string; to?: string }) => {
+            const p = new URLSearchParams();
+            if (params?.from) p.set("from", params.from);
+            if (params?.to) p.set("to", params.to);
+            const qs = p.toString();
+            return request<{
+                patient: {
+                    id: string;
+                    name: string;
+                    phone?: string | null;
+                    email?: string | null;
+                };
+                statement: {
+                    from: string;
+                    to: string;
+                    generatedAt: string;
+                    openingBalance: number;
+                    totalCharges: number;
+                    totalPayments: number;
+                    totalAdjustments: number;
+                    closingBalance: number;
+                };
+                entries: Array<{
+                    id: string;
+                    date: string;
+                    type: "charge" | "payment" | "adjustment";
+                    sourceType: string;
+                    sourceId: string;
+                    description: string;
+                    debit: number;
+                    credit: number;
+                    balanceAfter: number;
+                    status?: string;
+                }>;
+                paymentPlans: Array<{
+                    planId: string;
+                    title: string;
+                    status: string;
+                    totalAmount: number;
+                    paidAmount: number;
+                    remainingAmount: number;
+                    nextDueDate: string | null;
+                    overdueAmount: number;
+                    overdueCount: number;
+                }>;
+            }>(`/ledger/patient/${patientId}/statement${qs ? `?${qs}` : ""}`);
+        },
     },
 
     // ─── Payment Plans (Phase 6B) ─────────────────────────────────────

@@ -1730,13 +1730,202 @@ function PatientEditDialog({
     );
 }
 
-// ─── Account Ledger Component (Phase 6A) ────────────────────────────
+// ─── Account Ledger Component (Phase 6A + 6C1 Statement) ─────────────
 
 function AccountLedger({ patientId }: { patientId: string }) {
+    const [showStatement, setShowStatement] = useState(false);
+    const [statementFrom, setStatementFrom] = useState("");
+    const [statementTo, setStatementTo] = useState("");
+    const [statementData, setStatementData] = useState<any>(null);
+    const [statementLoading, setStatementLoading] = useState(false);
+
     const { data: ledger, isLoading, isError } = useQuery({
         queryKey: ["ledger", "patient", patientId],
         queryFn: () => api.ledger.patient(patientId),
     });
+
+    async function generateStatement() {
+        setStatementLoading(true);
+        try {
+            const params: { from?: string; to?: string } = {};
+            if (statementFrom) params.from = statementFrom;
+            if (statementTo) params.to = statementTo;
+            const data = await api.ledger.statement(patientId, params);
+            setStatementData(data);
+        } finally {
+            setStatementLoading(false);
+        }
+    }
+
+    function printStatement() {
+        const printWindow = window.open("", "_blank");
+        if (!statementData) return;
+        if (!printWindow) {
+            window.alert("Unable to open print window. Please allow pop-ups for this site and try again.");
+            return;
+        }
+
+        const { patient, statement, entries, paymentPlans } = statementData;
+
+        const html = `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Account Statement - ${patient.name}</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; color: #333; }
+        .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #2563eb; padding-bottom: 20px; }
+        .header h1 { margin: 0; color: #2563eb; font-size: 24px; }
+        .header p { margin: 5px 0; color: #666; }
+        .section { margin-bottom: 25px; }
+        .section h2 { font-size: 16px; color: #2563eb; border-bottom: 1px solid #ddd; padding-bottom: 5px; margin-bottom: 15px; }
+        .patient-info { display: flex; justify-content: space-between; margin-bottom: 20px; }
+        .patient-info div { flex: 1; }
+        .patient-info label { font-weight: bold; color: #666; display: block; font-size: 12px; }
+        .patient-info span { font-size: 14px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th { background: #f3f4f6; text-align: left; padding: 10px; font-weight: 600; color: #374151; border-bottom: 2px solid #e5e7eb; }
+        td { padding: 10px; border-bottom: 1px solid #e5e7eb; }
+        .text-right { text-align: right; }
+        .summary-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px; margin-bottom: 20px; }
+        .summary-card { background: #f9fafb; padding: 15px; border-radius: 8px; text-align: center; border: 1px solid #e5e7eb; }
+        .summary-card label { display: block; font-size: 11px; color: #6b7280; margin-bottom: 5px; text-transform: uppercase; }
+        .summary-card value { display: block; font-size: 18px; font-weight: bold; color: #111827; }
+        .debit { color: #ea580c; }
+        .credit { color: #059669; }
+        .balance { color: #2563eb; }
+        .badge { display: inline-block; padding: 3px 8px; border-radius: 12px; font-size: 11px; font-weight: 500; }
+        .badge-charge { background: #fff7ed; color: #c2410c; }
+        .badge-payment { background: #ecfdf5; color: #047857; }
+        .badge-adjustment { background: #f3f4f6; color: #4b5563; }
+        .overdue { color: #dc2626; }
+        .print-date { text-align: right; font-size: 11px; color: #9ca3af; margin-top: 30px; }
+        @media print { body { margin: 20px; } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Dental Clinic</h1>
+        <p>Patient Account Statement</p>
+        <p style="font-size: 12px;">Period: ${statement.from} to ${statement.to}</p>
+    </div>
+
+    <div class="section">
+        <div class="patient-info">
+            <div>
+                <label>Patient Name</label>
+                <span>${patient.name}</span>
+            </div>
+            <div>
+                <label>Patient ID</label>
+                <span>${patient.id}</span>
+            </div>
+            <div>
+                <label>Phone</label>
+                <span>${patient.phone || "—"}</span>
+            </div>
+            <div>
+                <label>Email</label>
+                <span>${patient.email || "—"}</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Statement Summary</h2>
+        <div class="summary-grid">
+            <div class="summary-card">
+                <label>Opening Balance</label>
+                <value>$${statement.openingBalance.toLocaleString()}</value>
+            </div>
+            <div class="summary-card">
+                <label>Total Charges</label>
+                <value class="debit">+$${statement.totalCharges.toLocaleString()}</value>
+            </div>
+            <div class="summary-card">
+                <label>Total Payments</label>
+                <value class="credit">-$${statement.totalPayments.toLocaleString()}</value>
+            </div>
+            <div class="summary-card">
+                <label>Adjustments</label>
+                <value>$${statement.totalAdjustments.toLocaleString()}</value>
+            </div>
+            <div class="summary-card">
+                <label>Closing Balance</label>
+                <value class="balance">$${statement.closingBalance.toLocaleString()}</value>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Transaction Details</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Type</th>
+                    <th>Description</th>
+                    <th class="text-right">Debit</th>
+                    <th class="text-right">Credit</th>
+                    <th class="text-right">Balance</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${entries.map((e: any) => `
+                <tr>
+                    <td>${new Date(e.date).toLocaleDateString()}</td>
+                    <td><span class="badge badge-${e.type}">${e.type}</span></td>
+                    <td>${e.description}${e.status ? ` (${e.status})` : ""}</td>
+                    <td class="text-right ${e.debit > 0 ? "debit" : ""}">${e.debit > 0 ? "$" + e.debit.toLocaleString() : "—"}</td>
+                    <td class="text-right ${e.credit > 0 ? "credit" : ""}">${e.credit > 0 ? "$" + e.credit.toLocaleString() : "—"}</td>
+                    <td class="text-right balance">$${e.balanceAfter.toLocaleString()}</td>
+                </tr>
+                `).join("")}
+            </tbody>
+        </table>
+    </div>
+
+    ${paymentPlans.length > 0 ? `
+    <div class="section">
+        <h2>Active Payment Plans</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Plan</th>
+                    <th>Status</th>
+                    <th class="text-right">Total</th>
+                    <th class="text-right">Paid</th>
+                    <th class="text-right">Remaining</th>
+                    <th>Next Due</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${paymentPlans.map((p: any) => `
+                <tr>
+                    <td>${p.title}</td>
+                    <td><span class="badge badge-${p.status === "active" ? "payment" : "adjustment"}">${p.status}</span></td>
+                    <td class="text-right">$${p.totalAmount.toLocaleString()}</td>
+                    <td class="text-right credit">$${p.paidAmount.toLocaleString()}</td>
+                    <td class="text-right ${p.remainingAmount > 0 ? "overdue" : ""}">$${p.remainingAmount.toLocaleString()}</td>
+                    <td>${p.nextDueDate ? new Date(p.nextDueDate).toLocaleDateString() : "—"}${p.overdueCount > 0 ? ` <span class="overdue">(${p.overdueCount} overdue)</span>` : ""}</td>
+                </tr>
+                `).join("")}
+            </tbody>
+        </table>
+    </div>
+    ` : ""}
+
+    <div class="print-date">
+        Statement generated on ${new Date(statement.generatedAt).toLocaleString()}
+    </div>
+
+    <script>window.onload = () => { setTimeout(() => { window.print(); }, 500); };</script>
+</body>
+</html>`;
+
+        printWindow.document.write(html);
+        printWindow.document.close();
+    }
 
     if (isLoading) {
         return (
@@ -1851,10 +2040,200 @@ function AccountLedger({ patientId }: { patientId: string }) {
             </div>
 
             {/* Footer info */}
-            <div className="text-xs text-gray-400 text-center">
-                Ledger computed from {totals.invoiceCount} invoice(s) and {totals.paymentCount} payment(s)
-                {totals.lastChargeDate && ` · Last charge: ${new Date(totals.lastChargeDate).toLocaleDateString()}`}
+            <div className="flex items-center justify-between">
+                <div className="text-xs text-gray-400">
+                    Ledger computed from {totals.invoiceCount} invoice(s) and {totals.paymentCount} payment(s)
+                    {totals.lastChargeDate && ` · Last charge: ${new Date(totals.lastChargeDate).toLocaleDateString()}`}
+                </div>
+                <button
+                    onClick={() => setShowStatement(true)}
+                    className="px-4 py-2 bg-primary-600 text-white text-sm font-semibold rounded-lg hover:bg-primary-700 transition"
+                >
+                    📄 Generate Statement
+                </button>
             </div>
+
+            {/* Statement Modal */}
+            {showStatement && (
+                <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-xl w-full max-w-5xl max-h-[90vh] overflow-y-auto">
+                        <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+                            <h3 className="text-xl font-bold text-gray-900">Account Statement</h3>
+                            <button
+                                onClick={() => {
+                                    setShowStatement(false);
+                                    setStatementData(null);
+                                }}
+                                className="text-gray-400 hover:text-gray-600 text-2xl"
+                            >
+                                ×
+                            </button>
+                        </div>
+
+                        <div className="p-6 space-y-6">
+                            {/* Date Range Controls */}
+                            <div className="flex items-end gap-4 bg-gray-50 p-4 rounded-lg">
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-1">From</label>
+                                    <input
+                                        type="date"
+                                        value={statementFrom}
+                                        onChange={(e) => setStatementFrom(e.target.value)}
+                                        className="border border-gray-300 rounded-lg px-3 py-2"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-1">To</label>
+                                    <input
+                                        type="date"
+                                        value={statementTo}
+                                        onChange={(e) => setStatementTo(e.target.value)}
+                                        className="border border-gray-300 rounded-lg px-3 py-2"
+                                    />
+                                </div>
+                                <button
+                                    onClick={generateStatement}
+                                    disabled={statementLoading}
+                                    className="px-4 py-2 bg-primary-600 text-white font-semibold rounded-lg hover:bg-primary-700 transition disabled:opacity-50"
+                                >
+                                    {statementLoading ? "Generating..." : "Generate"}
+                                </button>
+                                {statementData && (
+                                    <button
+                                        onClick={printStatement}
+                                        className="px-4 py-2 bg-gray-800 text-white font-semibold rounded-lg hover:bg-gray-900 transition"
+                                    >
+                                        🖨️ Print / Save PDF
+                                    </button>
+                                )}
+                            </div>
+
+                            {/* Statement Display */}
+                            {statementData && (
+                                <div className="space-y-6">
+                                    {/* Patient Info */}
+                                    <div className="bg-gray-50 p-4 rounded-lg">
+                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                                            <div>
+                                                <span className="text-gray-500">Patient</span>
+                                                <p className="font-semibold">{statementData.patient.name}</p>
+                                            </div>
+                                            <div>
+                                                <span className="text-gray-500">Period</span>
+                                                <p className="font-semibold">{statementData.statement.from} to {statementData.statement.to}</p>
+                                            </div>
+                                            <div>
+                                                <span className="text-gray-500">Generated</span>
+                                                <p className="font-semibold">{new Date(statementData.statement.generatedAt).toLocaleString()}</p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Summary Cards */}
+                                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                                        <div className="bg-blue-50 rounded-xl p-4 border border-blue-200">
+                                            <p className="text-xs font-semibold text-blue-600 uppercase">Opening Balance</p>
+                                            <p className="text-xl font-bold text-blue-700">${statementData.statement.openingBalance.toLocaleString()}</p>
+                                        </div>
+                                        <div className="bg-orange-50 rounded-xl p-4 border border-orange-200">
+                                            <p className="text-xs font-semibold text-orange-600 uppercase">Total Charges</p>
+                                            <p className="text-xl font-bold text-orange-700">+${statementData.statement.totalCharges.toLocaleString()}</p>
+                                        </div>
+                                        <div className="bg-emerald-50 rounded-xl p-4 border border-emerald-200">
+                                            <p className="text-xs font-semibold text-emerald-600 uppercase">Total Payments</p>
+                                            <p className="text-xl font-bold text-emerald-700">-${statementData.statement.totalPayments.toLocaleString()}</p>
+                                        </div>
+                                        <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
+                                            <p className="text-xs font-semibold text-gray-600 uppercase">Adjustments</p>
+                                            <p className="text-xl font-bold text-gray-700">${statementData.statement.totalAdjustments.toLocaleString()}</p>
+                                        </div>
+                                        <div className={`rounded-xl p-4 border ${statementData.statement.closingBalance > 0 ? 'bg-rose-50 border-rose-200' : 'bg-emerald-50 border-emerald-200'}`}>
+                                            <p className={`text-xs font-semibold uppercase ${statementData.statement.closingBalance > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>Closing Balance</p>
+                                            <p className={`text-xl font-bold ${statementData.statement.closingBalance > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>${statementData.statement.closingBalance.toLocaleString()}</p>
+                                        </div>
+                                    </div>
+
+                                    {/* Entries Table */}
+                                    <div className="border border-gray-200 rounded-xl overflow-hidden">
+                                        <table className="w-full text-left">
+                                            <thead className="bg-gray-50">
+                                                <tr>
+                                                    <th className="px-4 py-3 text-xs font-semibold text-gray-600">Date</th>
+                                                    <th className="px-4 py-3 text-xs font-semibold text-gray-600">Type</th>
+                                                    <th className="px-4 py-3 text-xs font-semibold text-gray-600">Description</th>
+                                                    <th className="px-4 py-3 text-xs font-semibold text-gray-600 text-right">Debit</th>
+                                                    <th className="px-4 py-3 text-xs font-semibold text-gray-600 text-right">Credit</th>
+                                                    <th className="px-4 py-3 text-xs font-semibold text-gray-600 text-right">Balance</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-100">
+                                                {statementData.entries.map((entry: any) => (
+                                                    <tr key={entry.id} className="hover:bg-gray-50">
+                                                        <td className="px-4 py-2 text-sm text-gray-600">{new Date(entry.date).toLocaleDateString()}</td>
+                                                        <td className="px-4 py-2">
+                                                            <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium
+                                                                ${entry.type === 'charge' ? 'bg-orange-100 text-orange-700' :
+                                                                    entry.type === 'payment' ? 'bg-emerald-100 text-emerald-700' :
+                                                                        'bg-gray-100 text-gray-700'}`}>
+                                                                {entry.type}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-4 py-2 text-sm text-gray-700">{entry.description}</td>
+                                                        <td className="px-4 py-2 text-sm text-right text-orange-600">{entry.debit > 0 ? `$${entry.debit.toLocaleString()}` : '—'}</td>
+                                                        <td className="px-4 py-2 text-sm text-right text-emerald-600">{entry.credit > 0 ? `$${entry.credit.toLocaleString()}` : '—'}</td>
+                                                        <td className="px-4 py-2 text-sm text-right font-bold">${entry.balanceAfter.toLocaleString()}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+
+                                    {/* Payment Plans Summary */}
+                                    {statementData.paymentPlans.length > 0 && (
+                                        <div className="border border-gray-200 rounded-xl overflow-hidden">
+                                            <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
+                                                <h4 className="font-semibold text-gray-700">Payment Plans</h4>
+                                            </div>
+                                            <table className="w-full text-left">
+                                                <thead className="bg-gray-50">
+                                                    <tr>
+                                                        <th className="px-4 py-2 text-xs font-semibold text-gray-600">Plan</th>
+                                                        <th className="px-4 py-2 text-xs font-semibold text-gray-600">Status</th>
+                                                        <th className="px-4 py-2 text-xs font-semibold text-gray-600 text-right">Total</th>
+                                                        <th className="px-4 py-2 text-xs font-semibold text-gray-600 text-right">Paid</th>
+                                                        <th className="px-4 py-2 text-xs font-semibold text-gray-600 text-right">Remaining</th>
+                                                        <th className="px-4 py-2 text-xs font-semibold text-gray-600">Next Due</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-gray-100">
+                                                    {statementData.paymentPlans.map((plan: any) => (
+                                                        <tr key={plan.planId} className="hover:bg-gray-50">
+                                                            <td className="px-4 py-2 text-sm font-medium">{plan.title}</td>
+                                                            <td className="px-4 py-2">
+                                                                <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium
+                                                                    ${plan.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-700'}`}>
+                                                                    {plan.status}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-4 py-2 text-sm text-right">${plan.totalAmount.toLocaleString()}</td>
+                                                            <td className="px-4 py-2 text-sm text-right text-emerald-600">${plan.paidAmount.toLocaleString()}</td>
+                                                            <td className={`px-4 py-2 text-sm text-right ${plan.remainingAmount > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>${plan.remainingAmount.toLocaleString()}</td>
+                                                            <td className="px-4 py-2 text-sm">
+                                                                {plan.nextDueDate ? new Date(plan.nextDueDate).toLocaleDateString() : '—'}
+                                                                {plan.overdueCount > 0 && <span className="ml-2 text-rose-600">({plan.overdueCount} overdue)</span>}
+                                                            </td>
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
