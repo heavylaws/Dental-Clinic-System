@@ -2976,6 +2976,95 @@ No new limitations. Previous phase limitations remain:
 
 ---
 
-## Future Phases (Not Yet Defined)
+## Phase 8C — Final Release Readiness Checklist
 
-To be filled in by product owner.
+**Status:** ✅ COMPLETE
+
+### Goal
+
+Prepare the project for a clean release/handoff. No features added, no business logic changed. Documentation-only phase.
+
+### Files Added / Updated
+
+| File | Change |
+|------|--------|
+| `README.md` | Full rewrite — overview, tech stack, install, run commands, demo credentials, desktop/mobile routes, completed modules, known limitations, safety notes |
+| `.env.example` | Added `REMINDER_SCHEDULER_ENABLED` variable (already used by scheduler module) |
+| `RELEASE_CHECKLIST.md` | **New** — pre-release build commands, runtime route checklist, workflow checklist (appointments/reminders/financial/treatment plans), known limitations, deployment notes, next phases |
+| `PRODUCT_PHASES.md` | Added Phase 8C documentation |
+
+### Release Documentation Created
+
+| Document | Contents |
+|----------|----------|
+| `README.md` | Project overview, tech stack, install/run commands, demo credentials, all routes, completed modules, known limitations, safety notes |
+| `RELEASE_CHECKLIST.md` | Build checks, route checklist, workflow checklist, known limitations table, deployment notes, next phase recommendations |
+| `.env.example` | All environment variables used by the server: `SESSION_SECRET`, `NODE_ENV`, `PORT`, `HTTPS_PORT`, `CORS_ORIGIN`, `DATABASE_URL`, `UI_PORT`, `REMINDER_SCHEDULER_ENABLED` |
+
+### Run Commands Confirmed
+
+Commands documented in README and RELEASE_CHECKLIST are derived directly from `package.json` scripts:
+
+| Script | Command |
+|--------|---------|
+| `npm run dev` | `concurrently "npm run dev:server" "npm run dev:client"` |
+| `npm run dev:server` | `tsx watch server/index.ts` |
+| `npm run dev:client` | `vite --host` |
+| `npm run build` | `vite build && tsc -p tsconfig.server.json` |
+
+### Environment Documentation
+
+| Variable | Status |
+|----------|--------|
+| `SESSION_SECRET` | Required — documented with generation command |
+| `NODE_ENV` | Optional — documented |
+| `PORT` / `HTTPS_PORT` | Optional — documented with defaults |
+| `CORS_ORIGIN` | Optional (required in production) — documented |
+| `DATABASE_URL` | Optional — documented (enables PostgreSQL persistence) |
+| `UI_PORT` | Optional — documented |
+| `REMINDER_SCHEDULER_ENABLED` | Optional — **added** to `.env.example` (already used in scheduler) |
+
+No variables were invented. Only variables verified in source code are documented.
+
+### Known Limitations (Phase 8C Summary)
+
+| Limitation | Notes |
+|------------|-------|
+| In-memory data by default | Data resets on restart unless `DATABASE_URL` is set |
+| No server-generated PDFs | Print uses browser dialog; share uses `wa.me` links |
+| WhatsApp stub/link-only | `whatsapp-web.js` requires paired session; without it, logs `not_configured` |
+| Email not configured | Email reminders stubbed; no SMTP shipped |
+| No mobile treatment plan editing | Mobile is read-only for treatment plans |
+| No DB-backed audit trail | Audit log is in-memory only |
+| Demo credentials hardcoded | Must be replaced before production use |
+| No SSL certs shipped | Camera requires HTTPS; see `REMOTE_ACCESS_DOCS.md` |
+| No HIPAA/GDPR compliance | No compliance claims made |
+
+### Build Results
+
+| Command | Result |
+|---------|--------|
+| `npx tsc --noEmit` | ✅ exit 0 |
+| `npx vite build` | ✅ success |
+| `npx tsc -p tsconfig.server.json` | ✅ exit 0 |
+
+### Next Recommended Phases
+
+| Phase | Description |
+|-------|-------------|
+| Phase 9 | PostgreSQL-first persistence — migrate all in-memory stores to DB-backed repositories |
+| Phase 10 | Real email/SMS integration |
+| Phase 11 | Server-side PDF generation |
+| Phase 12 | Production hardening — remove demo credentials, DB-backed audit trail |
+| Phase 13 | Mobile treatment plans — full create/edit/delete UI |
+| Phase 14 | HIPAA/GDPR compliance review |
+
+### Ready to Commit
+
+✅ Phase 8C is complete. Documentation-only changes, no source code modified, all builds passing.
+
+---
+
+## Future Phases
+
+See Phase 8C → Next Recommended Phases table above.
