@@ -35,6 +35,10 @@ export interface PatientReminderPreferences {
     whatsapp: boolean;
     sms: boolean;
     email: boolean;
+    // Opt-out flags (Phase 5C addition)
+    smsOptOut?: boolean;
+    emailOptOut?: boolean;
+    whatsappOptOut?: boolean;
 }
 
 // ─── Default templates ────────────────────────────────────────────────────────
@@ -81,6 +85,9 @@ const DEFAULT_PREFERENCES: PatientReminderPreferences = {
     whatsapp: true,
     sms: false,
     email: false,
+    smsOptOut: false,
+    emailOptOut: false,
+    whatsappOptOut: false,
 };
 
 // ─── Accessors ────────────────────────────────────────────────────────────────
@@ -167,6 +174,9 @@ export function setPatientPreferences(
         whatsapp: patch.whatsapp !== undefined ? Boolean(patch.whatsapp) : current.whatsapp,
         sms: patch.sms !== undefined ? Boolean(patch.sms) : current.sms,
         email: patch.email !== undefined ? Boolean(patch.email) : current.email,
+        smsOptOut: patch.smsOptOut !== undefined ? Boolean(patch.smsOptOut) : Boolean(current.smsOptOut),
+        emailOptOut: patch.emailOptOut !== undefined ? Boolean(patch.emailOptOut) : Boolean(current.emailOptOut),
+        whatsappOptOut: patch.whatsappOptOut !== undefined ? Boolean(patch.whatsappOptOut) : Boolean(current.whatsappOptOut),
     };
     patientPreferences.set(patientId, updated);
     return { ...updated };

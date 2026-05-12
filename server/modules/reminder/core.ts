@@ -77,7 +77,8 @@ export async function sendAppointmentReminder(opts: SendReminderOptions): Promis
     // ── Phase 5C: patient opt-out check ──
     if (patient?.id) {
         const prefs = getPatientPreferences(patient.id);
-        if (!prefs.remindersEnabled) {
+
+        if (prefs.remindersEnabled === false) {
             const log: ReminderLog = {
                 id: uuidv4(),
                 appointmentId: opts.appointmentId,
@@ -87,7 +88,7 @@ export async function sendAppointmentReminder(opts: SendReminderOptions): Promis
                 channel,
                 status: "not_configured",
                 message: "",
-                error: "Patient has opted out of reminders",
+                error: "Patient has disabled reminders",
                 sentAt: new Date().toISOString(),
                 appointmentDate: appt.appointmentDate,
                 timeSlot: appt.timeSlot,
@@ -99,7 +100,9 @@ export async function sendAppointmentReminder(opts: SendReminderOptions): Promis
             return { success: false, message: "Patient has opted out of reminders.", log, httpStatus: 200 };
         }
 
-        if (!prefs[channel]) {
+        // Check if patient has explicitly opted out of all reminders
+        const optedOut = !!prefs.smsOptOut && !!prefs.emailOptOut && !!prefs.whatsappOptOut;
+        if (optedOut) {
             const log: ReminderLog = {
                 id: uuidv4(),
                 appointmentId: opts.appointmentId,
@@ -109,7 +112,7 @@ export async function sendAppointmentReminder(opts: SendReminderOptions): Promis
                 channel,
                 status: "not_configured",
                 message: "",
-                error: `Patient has disabled ${channel} reminders`,
+                error: "Patient has opted out of all reminders",
                 sentAt: new Date().toISOString(),
                 appointmentDate: appt.appointmentDate,
                 timeSlot: appt.timeSlot,
@@ -118,12 +121,41 @@ export async function sendAppointmentReminder(opts: SendReminderOptions): Promis
                 dueAt,
             };
             demoReminderLogs.push(log);
-            return {
-                success: false,
-                message: `Patient has disabled ${channel} reminders.`,
-                log,
-                httpStatus: 200,
+            return { success: false, message: "Patient has opted out of reminders.", log, httpStatus: 200 };
+        }
+
+        // Check if patient has opted out of this specific channel
+        const channelOptOutMap: Record<string, boolean> = {
+            sms: !!prefs.smsOptOut,
+            email: !!prefs.emailOptOut,
+            whatsapp: !!prefs.whatsappOptOut,
+        };
+        const channelEnabledMap: Record<string, boolean> = {
+            sms: prefs.sms !== false,
+            email: prefs.email !== false,
+            whatsapp: prefs.whatsapp !== false,
+        };
+
+        if (channelOptOutMap[channel] || !channelEnabledMap[channel]) {
+            const log: ReminderLog = {
+                id: uuidv4(),
+                appointmentId: opts.appointmentId,
+                patientId: patient.id,
+                patientName,
+                phone,
+                channel,
+                status: "not_configured",
+                message: "",
+                error: `Patient has opted out of ${channel} reminders`,
+                sentAt: new Date().toISOString(),
+                appointmentDate: appt.appointmentDate,
+                timeSlot: appt.timeSlot,
+                ruleKey,
+                triggerType,
+                dueAt,
             };
+            demoReminderLogs.push(log);
+            return { success: false, message: `Patient has opted out of ${channel} reminders.`, log, httpStatus: 200 };
         }
     }
 
