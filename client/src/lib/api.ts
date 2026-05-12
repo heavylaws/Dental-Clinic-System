@@ -151,18 +151,6 @@ export const api = {
             }),
     },
 
-    // ─── Treatment Plans ──────────────────────────────────────────────
-
-    treatmentPlans: {
-        forPatient: (patientId: string) => request<any[]>(`/treatment-plans/patient/${patientId}`),
-        create: (data: any) => request<any>("/treatment-plans", { method: "POST", body: JSON.stringify(data) }),
-        update: (id: string, data: any) => request<any>(`/treatment-plans/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
-        delete: (id: string) => request(`/treatment-plans/${id}`, { method: "DELETE" }),
-        addItem: (planId: string, data: any) => request<any>(`/treatment-plans/${planId}/items`, { method: "POST", body: JSON.stringify(data) }),
-        updateItem: (itemId: string, data: any) => request<any>(`/treatment-plans/items/${itemId}`, { method: "PATCH", body: JSON.stringify(data) }),
-        deleteItem: (itemId: string) => request(`/treatment-plans/items/${itemId}`, { method: "DELETE" }),
-    },
-
     // ─── Procedure Catalog ────────────────────────────────────────────
 
     procedureCatalog: {
@@ -883,6 +871,152 @@ export const api = {
                 method: "POST",
                 body: JSON.stringify(payload),
             }),
+    },
+
+    // ─── Treatment Plans (Phase 7A) ───────────────────────────────────
+
+    treatmentPlans: {
+        patient: (patientId: string) =>
+            request<{
+                patientId: string;
+                patientName: string;
+                plans: Array<{
+                    plan: {
+                        id: string;
+                        patientId: string;
+                        title: string;
+                        description?: string;
+                        status: "draft" | "presented" | "accepted" | "partially_accepted" | "declined" | "completed" | "cancelled";
+                        createdAt: string;
+                        updatedAt: string;
+                    };
+                    items: Array<{
+                        id: string;
+                        planId: string;
+                        patientId: string;
+                        tooth?: string | null;
+                        area?: string | null;
+                        procedureName: string;
+                        category?: string | null;
+                        description?: string;
+                        estimatedCost: number;
+                        priority: "low" | "medium" | "high" | "urgent";
+                        status: "proposed" | "accepted" | "declined" | "completed" | "cancelled";
+                        notes?: string;
+                        createdAt: string;
+                        updatedAt: string;
+                    }>;
+                    summary: {
+                        itemCount: number;
+                        proposedTotal: number;
+                        acceptedTotal: number;
+                        completedTotal: number;
+                        declinedTotal: number;
+                        remainingAcceptedTotal: number;
+                    };
+                }>;
+            }>(`/treatment-plans/patient/${patientId}`),
+        create: (patientId: string, payload: { title: string; description?: string }) =>
+            request<{
+                id: string;
+                patientId: string;
+                title: string;
+                description?: string;
+                status: string;
+                createdAt: string;
+                updatedAt: string;
+            }>(`/treatment-plans/patient/${patientId}`, {
+                method: "POST",
+                body: JSON.stringify(payload),
+            }),
+        update: (
+            planId: string,
+            payload: { title?: string; description?: string; status?: string }
+        ) =>
+            request<{
+                id: string;
+                patientId: string;
+                title: string;
+                description?: string;
+                status: string;
+                createdAt: string;
+                updatedAt: string;
+            }>(`/treatment-plans/${planId}`, {
+                method: "PUT",
+                body: JSON.stringify(payload),
+            }),
+        addItem: (
+            planId: string,
+            payload: {
+                tooth?: string;
+                area?: string;
+                procedureName: string;
+                category?: string;
+                description?: string;
+                estimatedCost: number;
+                priority: "low" | "medium" | "high" | "urgent";
+                notes?: string;
+            }
+        ) =>
+            request<{
+                id: string;
+                planId: string;
+                patientId: string;
+                tooth?: string | null;
+                area?: string | null;
+                procedureName: string;
+                category?: string | null;
+                description?: string;
+                estimatedCost: number;
+                priority: string;
+                status: string;
+                notes?: string;
+                createdAt: string;
+                updatedAt: string;
+            }>(`/treatment-plans/${planId}/items`, {
+                method: "POST",
+                body: JSON.stringify(payload),
+            }),
+        updateItem: (
+            itemId: string,
+            payload: {
+                tooth?: string;
+                area?: string;
+                procedureName?: string;
+                category?: string;
+                description?: string;
+                estimatedCost?: number;
+                priority?: "low" | "medium" | "high" | "urgent";
+                status?: "proposed" | "accepted" | "declined" | "completed" | "cancelled";
+                notes?: string;
+            }
+        ) =>
+            request<{
+                id: string;
+                planId: string;
+                patientId: string;
+                tooth?: string | null;
+                area?: string | null;
+                procedureName: string;
+                category?: string | null;
+                description?: string;
+                estimatedCost: number;
+                priority: string;
+                status: string;
+                notes?: string;
+                createdAt: string;
+                updatedAt: string;
+            }>(`/treatment-plans/items/${itemId}`, {
+                method: "PUT",
+                body: JSON.stringify(payload),
+            }),
+        deleteItem: (itemId: string) =>
+            request<{ success: boolean; message: string; item?: any }>(
+                `/treatment-plans/items/${itemId}`,
+                {
+                    method: "DELETE",
+                }
+            ),
     },
 };
 

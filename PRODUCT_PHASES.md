@@ -1963,6 +1963,188 @@ The Dashboard and Reports consume the same aging data as the Billing page:
 
 ---
 
+## Phase 7A — Treatment Plan Foundation
+
+**Status:** ✅ COMPLETE
+
+### Goal
+
+Create the backend and patient-file foundation for dental treatment plans. Clinicians can create planned dental procedures for patients with status tracking, tooth/area identification, estimated costs, and priority levels.
+
+**Important:** Treatment plan estimates do NOT affect the patient ledger until later conversion to actual visit/billing (Phase 7C).
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `server/modules/treatment_plan/index.ts` | Rewrote with Phase 7A models, endpoints, validation, summary calculations |
+| `client/src/lib/api.ts` | Updated `api.treatmentPlans` with new typed methods matching Phase 7A endpoints |
+| `client/src/components/patient/TreatmentPlanBuilder.tsx` | Rewrote with expandable plan cards, item management, summary display, add/edit forms |
+| `PRODUCT_PHASES.md` | This entry |
+
+### Backend Summary
+
+**Data Models:**
+
+```typescript
+TreatmentPlan {
+  id: string;
+  patientId: string;
+  title: string;
+  description?: string;
+  status: "draft" | "presented" | "accepted" | "partially_accepted" | "declined" | "completed" | "cancelled";
+  createdAt: string;
+  updatedAt: string;
+}
+
+TreatmentPlanItem {
+  id: string;
+  planId: string;
+  patientId: string;
+  tooth?: string | null;
+  area?: string | null;
+  procedureName: string;
+  category?: string | null;
+  description?: string;
+  estimatedCost: number;
+  priority: "low" | "medium" | "high" | "urgent";
+  status: "proposed" | "accepted" | "declined" | "completed" | "cancelled";
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+```
+
+**Endpoints:**
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/treatment-plans/patient/:patientId` | GET | Returns patient plans with items and summaries |
+| `/api/treatment-plans/patient/:patientId` | POST | Creates new treatment plan (title required) |
+| `/api/treatment-plans/:planId` | PUT | Updates plan title, description, status |
+| `/api/treatment-plans/:planId/items` | POST | Adds item to plan |
+| `/api/treatment-plans/items/:itemId` | PUT | Updates item (procedure, cost, priority, status, etc.) |
+| `/api/treatment-plans/items/:itemId` | DELETE | Deletes draft/proposed items; cancels accepted/completed items |
+
+**Validation Rules:**
+- Title is required for plan creation
+- Procedure name is required for items
+- Estimated cost must be >= 0
+- Priority must be one of: low, medium, high, urgent
+- Plan status must be valid enum value
+- Item status must be valid enum value
+- Patient must exist (404 if not found)
+
+**Summary Calculation Rules:**
+- `proposedTotal` = sum of estimatedCost for proposed + accepted + completed items
+- `acceptedTotal` = sum of accepted + completed items
+- `completedTotal` = sum of completed items only
+- `declinedTotal` = sum of declined items
+- `remainingAcceptedTotal` = acceptedTotal - completedTotal
+- All values rounded to 2 decimals
+
+**Delete Behavior:**
+- Draft/proposed items: hard deleted
+- Accepted/completed items: status changed to "cancelled" (soft delete)
+- Returns message indicating which behavior occurred
+
+### Client API Summary
+
+```typescript
+api.treatmentPlans.patient(patientId: string) → Promise<TreatmentPlansResponse>
+api.treatmentPlans.create(patientId, { title, description? }) → Promise<TreatmentPlan>
+api.treatmentPlans.update(planId, { title?, description?, status? }) → Promise<TreatmentPlan>
+api.treatmentPlans.addItem(planId, { procedureName, estimatedCost, priority, ... }) → Promise<TreatmentPlanItem>
+api.treatmentPlans.updateItem(itemId, payload) → Promise<TreatmentPlanItem>
+api.treatmentPlans.deleteItem(itemId) → Promise<{ success, message, item? }>
+```
+
+### Desktop UI Summary
+
+**Location:** PatientFile.tsx → "📋 Treatment Plans" tab
+
+**TreatmentPlanBuilder Component:**
+- Header with "New Plan" button and explanatory note about estimates not affecting ledger
+- List of collapsible plan cards
+- Empty state with friendly messaging
+
+**Plan Card (Collapsed):**
+- Title, status badge (color-coded), item count
+- Summary totals: Proposed, Accepted, Completed, Remaining
+- Expand/collapse chevron
+- Status dropdown for quick plan status change
+
+**Plan Card (Expanded):**
+- Summary cards (4-column grid): Proposed, Accepted, Completed, Remaining
+- Items table with columns:
+  - Tooth/Area
+  - Procedure (with category and description)
+  - Priority (color-coded: urgent=rose, high=orange, medium=amber, low=gray)
+  - Status (dropdown to change status inline)
+  - Estimated Cost (right-aligned)
+  - Actions (edit ✏️, delete 🗑️)
+- "Add Treatment Item" button (dashed border)
+
+**Add Item Form:**
+- Procedure Name * (required)
+- Estimated Cost * (required, must be >= 0)
+- Tooth (optional)
+- Area (optional)
+- Category (optional)
+- Priority (select: low/medium/high/urgent)
+- Description (optional)
+- Notes (textarea, optional)
+
+**Edit Item Form:**
+- Same fields as Add Item
+- Plus Status dropdown (proposed/accepted/declined/completed/cancelled)
+
+**Status Colors:**
+- Plan statuses: gray (draft), sky (presented), emerald (accepted), amber (partially_accepted), rose (declined), blue (completed), gray (cancelled)
+- Item statuses: gray (proposed), emerald (accepted), rose (declined), blue (completed), gray strikethrough (cancelled)
+- Priorities: rose bold (urgent), orange semibold (high), amber (medium), gray (low)
+
+### Financial Non-Impact Confirmation
+
+**Treatment plans do NOT affect:**
+- Patient ledger balance
+- Account Ledger entries
+- Billing totals
+- Payment plan calculations
+- Aging calculations
+- Dashboard outstanding amounts
+- Reports outstanding amounts
+
+**Clear UI labeling:** "Estimates do NOT affect Account Ledger until converted to billing"
+
+### Mobile Decision
+
+**No mobile changes.**
+
+- Mobile treatment plans UI deferred to Phase 7B or later
+- Mobile `/m` and `/m/appointments` must still build and run
+- No mobile file modifications made
+
+### Build Results
+
+| Command | Result |
+|---------|--------|
+| `npx tsc --noEmit` | ✅ exit 0 |
+| `npx vite build` | ✅ no errors |
+| `npx tsc -p tsconfig.server.json` | ✅ exit 0 |
+
+### Known Limitations
+
+- **No tooth chart UI yet** — Phase 7B
+- **No conversion to visit/billing yet** — Phase 7C
+- **No treatment plan print/share yet** — Phase 7D
+- **In-memory/demo persistence only** — data resets on server restart
+- **Mobile treatment plan UI deferred** — desktop only
+- **No audit trail** — production needs item history tracking
+- **No procedure catalog integration** — future enhancement
+
+---
+
 ## Future Phases (Not Yet Defined)
 
 To be filled in by product owner.
