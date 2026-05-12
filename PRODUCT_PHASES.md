@@ -2531,6 +2531,140 @@ api.treatmentPlans.convertItem(itemId, {
 
 ---
 
+## Phase 7D — Treatment Plan Print/Share
+
+**Status:** ✅ COMPLETE
+
+### Goal
+
+Enable staff to present, print, and share treatment plans with patients. This phase focuses on patient-facing presentation without mutating any financial or clinical data.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `client/src/components/patient/TreatmentPlanBuilder.tsx` | Added print/share functionality; polished presentation mode |
+| `PRODUCT_PHASES.md` | This entry |
+
+### Print / Save as PDF
+
+**Implementation:**
+- Browser-native print flow (no jsPDF, no html2canvas)
+- Opens clean popup window with generated HTML
+- Auto-generated print styles
+- User clicks "Print / Save PDF" button to open window
+- Browser Save as PDF available in print dialog
+
+**Print output includes:**
+- Clinic header: "Dental Clinic"
+- Patient name from API
+- Plan title and status
+- Generated date/time
+- Summary totals (proposed, accepted, completed, remaining)
+- Treatment item table with:
+  - Tooth/Area
+  - Procedure (with category, description)
+  - Priority
+  - Status
+  - Estimated cost
+  - Notes (if present)
+- Tooth/area summary section (if applicable)
+- Clear disclaimer: "This treatment plan is an estimate and does not represent a final invoice. Final charges may change after clinical evaluation."
+
+**Print output excludes:**
+- App navigation
+- Edit/delete/convert buttons
+- Internal IDs
+- Technical references
+
+### Patient Presentation View Polish
+
+**Existing presentation mode enhanced:**
+- Clean patient-facing layout maintained
+- Edit/delete/convert controls hidden
+- Status and estimates clearly visible
+- Added disclaimer banner in presentation mode:
+  > "Important: This treatment plan is an estimate and does not represent a final invoice. Final charges may change after clinical evaluation."
+
+### WhatsApp Sharing
+
+**Behavior:**
+- Button labeled "📱 Open WhatsApp" (not "Send")
+- Fetches patient phone from API
+- Generates text summary with:
+  - Patient greeting with name
+  - Plan title
+  - Proposed and accepted totals
+  - Up to 5 major procedures with tooth info
+  - Estimate disclaimer
+  - Clinic contact note
+- Opens `https://wa.me/{phone}?text={message}` in new tab
+- Does NOT claim message was sent
+
+**Error handling:**
+- If patient phone missing → alert: "Patient phone number not available. Cannot share via WhatsApp."
+- If API fetch fails → alert: "Could not retrieve patient phone number..."
+
+### Email Sharing
+
+**Decision:** Deferred/not configured.
+
+No email infrastructure exists in the current codebase. Rather than faking email functionality or adding complexity, email sharing is explicitly deferred.
+
+UX remains clean — no "Email not configured" messages shown unless user explicitly looks for email functionality.
+
+### Financial Non-Impact Rule
+
+**Treatment plan print/share does NOT affect:**
+- Ledger balance
+- Billing records
+- Visit records
+- Payment plans
+- Account statements
+- Aging calculations
+- Outstanding invoices
+- Dashboard totals
+
+This is a read-only, presentational feature only.
+
+### Mobile Decision
+
+**No mobile changes.**
+
+- Desktop print/share workflow is priority
+- Mobile treatment plan print/share deferred
+- Mobile `/m` and `/m/appointments` must still build and run
+- No mobile file modifications
+
+### UI Locations
+
+**In TreatmentPlanBuilder (per plan):**
+- Print/Save PDF button in expanded plan view
+- WhatsApp button next to print button
+- Both buttons hidden in presentation mode
+- Both buttons have `print:hidden` class
+
+### Build Results
+
+| Command | Result |
+|---------|--------|
+| `npx tsc --noEmit` | ✅ exit 0 |
+| `npx vite build` | ✅ no errors |
+| `npx tsc -p tsconfig.server.json` | ✅ exit 0 |
+
+### Known Limitations
+
+- **Browser print/save-as-PDF only** — no server-generated PDF
+- **No PDF attachment via WhatsApp** — text message only
+- **Email sharing deferred/not configured** — no email infrastructure
+- **Mobile treatment plan print/share deferred** — desktop only
+- **No share audit log** — production may need print/share tracking
+- **Clinic name hardcoded** — production should use clinic settings
+- **WhatsApp requires patient phone** — no manual phone entry in modal
+- **No branded templates** — production may need custom CSS/logo
+
+---
+
 ## Future Phases (Not Yet Defined)
 
 To be filled in by product owner.

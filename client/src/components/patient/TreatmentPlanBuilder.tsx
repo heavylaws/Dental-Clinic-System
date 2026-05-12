@@ -150,6 +150,7 @@ export function TreatmentPlanBuilder({ patientId }: Props) {
                         <TreatmentPlanCard
                             key={planData.plan.id}
                             planData={planData}
+                            patientName={plansData?.patientName || ""}
                             expanded={expandedPlanId === planData.plan.id}
                             onToggle={() => setExpandedPlanId(expandedPlanId === planData.plan.id ? null : planData.plan.id)}
                             onUpdate={loadPlans}
@@ -164,12 +165,14 @@ export function TreatmentPlanBuilder({ patientId }: Props) {
 
 function TreatmentPlanCard({
     planData,
+    patientName,
     expanded,
     onToggle,
     onUpdate,
     presentationMode = false,
 }: {
     planData: TreatmentPlanData;
+    patientName: string;
     expanded: boolean;
     onToggle: () => void;
     onUpdate: () => Promise<void>;
@@ -258,6 +261,206 @@ function TreatmentPlanCard({
             case "low": return "text-gray-500";
             default: return "text-gray-500";
         }
+    };
+
+    // Phase 7D: Print treatment plan
+    const handlePrintPlan = () => {
+        const printWindow = window.open("", "_blank");
+        if (!printWindow) {
+            alert("Please allow popups to print the treatment plan");
+            return;
+        }
+
+        // Escape user-controlled strings for safe HTML insertion
+        const esc = (s: string | null | undefined) =>
+            String(s ?? "")
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;");
+
+        const hasNotes = items.some(i => i.notes);
+        const now = new Date().toLocaleString();
+        const teethInvolved = Array.from(new Set(items.filter(i => i.tooth).map(i => i.tooth))).join(", ");
+        const areasInvolved = Array.from(new Set(items.filter(i => i.area).map(i => i.area))).join(", ");
+
+        const itemsHtml = items.map(item => `
+            <tr>
+                <td>${esc(item.tooth || item.area || "—")}</td>
+                <td>
+                    <strong>${esc(item.procedureName)}</strong>
+                    ${item.category ? `<br><small>${esc(item.category)}</small>` : ""}
+                    ${item.description ? `<br><small class="description">${esc(item.description)}</small>` : ""}
+                </td>
+                <td>${esc(item.priority.toUpperCase())}</td>
+                <td>${esc(item.status.charAt(0).toUpperCase() + item.status.slice(1))}</td>
+                <td class="cost">${formatCurrency(item.estimatedCost)}</td>
+                ${hasNotes ? `<td class="notes">${esc(item.notes)}</td>` : ""}
+            </tr>
+        `).join("");
+
+        printWindow.document.write(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Treatment Plan - ${esc(plan.title)}</title>
+                <style>
+                    body { font-family: system-ui, -apple-system, sans-serif; margin: 40px; color: #333; }
+                    .header { border-bottom: 2px solid #2563eb; padding-bottom: 20px; margin-bottom: 30px; }
+                    .header h1 { margin: 0 0 10px 0; font-size: 28px; color: #1e40af; }
+                    .header .clinic { font-size: 14px; color: #666; }
+                    .header .meta { margin-top: 15px; font-size: 13px; color: #555; }
+                    .header .meta strong { color: #333; }
+                    .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin: 25px 0; }
+                    .summary-box { border: 1px solid #ddd; padding: 15px; border-radius: 6px; text-align: center; }
+                    .summary-box .label { font-size: 11px; text-transform: uppercase; color: #666; margin-bottom: 5px; }
+                    .summary-box .value { font-size: 20px; font-weight: bold; color: #333; }
+                    .summary-box.accepted { background: #f0fdf4; border-color: #86efac; }
+                    .summary-box.accepted .value { color: #15803d; }
+                    .tooth-summary { margin: 20px 0; padding: 15px; background: #f8fafc; border-radius: 6px; }
+                    .tooth-summary h4 { margin: 0 0 10px 0; font-size: 14px; color: #475569; }
+                    table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+                    th, td { padding: 12px; text-align: left; border-bottom: 1px solid #e5e7eb; }
+                    th { font-size: 11px; text-transform: uppercase; color: #6b7280; font-weight: 600; background: #f9fafb; }
+                    td { font-size: 13px; }
+                    td.cost { text-align: right; font-weight: 500; }
+                    td .description { color: #6b7280; }
+                    td .notes { color: #6b7280; font-style: italic; }
+                    .disclaimer { margin-top: 40px; padding: 20px; background: #fffbeb; border: 1px solid #fcd34d; border-radius: 6px; font-size: 12px; color: #92400e; }
+                    .disclaimer strong { color: #78350f; }
+                    .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #e5e7eb; font-size: 11px; color: #9ca3af; text-align: center; }
+                    @media print {
+                        body { margin: 20px; }
+                        .no-print { display: none; }
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="header">
+                    <div class="clinic">Dental Clinic</div>
+                    <h1>${esc(plan.title)}</h1>
+                    <div class="meta">
+                        <div><strong>Patient:</strong> ${esc(patientName)}</div>
+                        <div><strong>Status:</strong> ${esc(plan.status.replace("_", " ").toUpperCase())}</div>
+                        <div><strong>Generated:</strong> ${now}</div>
+                        ${plan.description ? `<div><strong>Description:</strong> ${esc(plan.description)}</div>` : ""}
+                    </div>
+                </div>
+
+                <div class="summary">
+                    <div class="summary-box">
+                        <div class="label">Proposed</div>
+                        <div class="value">${formatCurrency(summary.proposedTotal)}</div>
+                    </div>
+                    <div class="summary-box accepted">
+                        <div class="label">Accepted</div>
+                        <div class="value">${formatCurrency(summary.acceptedTotal)}</div>
+                    </div>
+                    <div class="summary-box">
+                        <div class="label">Completed</div>
+                        <div class="value">${formatCurrency(summary.completedTotal)}</div>
+                    </div>
+                    <div class="summary-box">
+                        <div class="label">Remaining</div>
+                        <div class="value">${formatCurrency(summary.remainingAcceptedTotal)}</div>
+                    </div>
+                </div>
+
+                ${teethInvolved || areasInvolved ? `
+                <div class="tooth-summary">
+                    <h4>Treatment Areas</h4>
+                    ${teethInvolved ? `<div><strong>Teeth:</strong> ${esc(teethInvolved)}</div>` : ""}
+                    ${areasInvolved ? `<div><strong>Areas:</strong> ${esc(areasInvolved)}</div>` : ""}
+                </div>
+                ` : ""}
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Tooth/Area</th>
+                            <th>Procedure</th>
+                            <th>Priority</th>
+                            <th>Status</th>
+                            <th class="cost">Est. Cost</th>
+                            ${items.some(i => i.notes) ? "<th>Notes</th>" : ""}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${itemsHtml}
+                    </tbody>
+                </table>
+
+                <div class="disclaimer">
+                    <strong>Important Notice:</strong> This treatment plan is an estimate and does not represent a final invoice. 
+                    Final charges may change after clinical evaluation. Please discuss any questions with your dental provider.
+                </div>
+
+                <div class="footer">
+                    Treatment Plan generated on ${now} • Dental Clinic
+                </div>
+
+                <div class="no-print" style="margin-top: 30px; text-align: center;">
+                    <button onclick="window.print()" style="padding: 12px 24px; font-size: 14px; cursor: pointer;">
+                        🖨️ Print / Save as PDF
+                    </button>
+                </div>
+            </body>
+            </html>
+        `);
+        printWindow.document.close();
+    };
+
+    // Phase 7D: Share via WhatsApp
+    const handleWhatsAppShare = async () => {
+        // Get patient phone - we need to fetch it or use from props
+        // For now, we'll try to get it from the API
+        try {
+            const response = await api.patients.get(plan.patientId);
+            const phone = response.phone;
+
+            if (!phone) {
+                alert("Patient phone number not available. Cannot share via WhatsApp.");
+                return;
+            }
+
+            const message = generateWhatsAppMessage();
+            const encodedMessage = encodeURIComponent(message);
+
+            // Normalize phone number
+            const normalizedPhone = phone.replace(/\D/g, "");
+            const whatsappUrl = `https://wa.me/${normalizedPhone}?text=${encodedMessage}`;
+
+            window.open(whatsappUrl, "_blank");
+        } catch (error) {
+            alert("Could not retrieve patient phone number. Please ensure the patient has a phone number on file.");
+        }
+    };
+
+    const generateWhatsAppMessage = () => {
+        const majorProcedures = items
+            .filter(i => i.status !== "cancelled")
+            .slice(0, 5)
+            .map(i => `• ${i.procedureName}${i.tooth ? ` (Tooth ${i.tooth})` : ""}`)
+            .join("\n");
+
+        return `Hello ${patientName},
+
+Here is your treatment plan from Dental Clinic:
+
+*${plan.title}*
+
+Proposed Total: ${formatCurrency(summary.proposedTotal)}
+Accepted Total: ${formatCurrency(summary.acceptedTotal)}
+
+Key Procedures:
+${majorProcedures}
+${items.length > 5 ? `\n...and ${items.length - 5} more items` : ""}
+
+Please note: This is an estimate only. Final charges may vary.
+
+Questions? Contact us at the clinic.
+
+— Dental Clinic`;
     };
 
     const updatePlanStatus = async (status: PlanStatus) => {
@@ -506,6 +709,34 @@ function TreatmentPlanCard({
                             <p className="text-lg font-bold text-amber-700">{formatCurrency(summary.remainingAcceptedTotal)}</p>
                         </div>
                     </div>
+
+                    {/* Phase 7D: Print/Share Actions */}
+                    {!presentationMode && (
+                        <div className="flex flex-wrap gap-2 mb-4 print:hidden">
+                            <button
+                                onClick={handlePrintPlan}
+                                className="px-3 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm font-medium flex items-center gap-2"
+                                title="Open print dialog to save as PDF"
+                            >
+                                🖨️ Print / Save PDF
+                            </button>
+                            <button
+                                onClick={handleWhatsAppShare}
+                                className="px-3 py-2 bg-emerald-100 text-emerald-700 rounded-md hover:bg-emerald-200 text-sm font-medium flex items-center gap-2"
+                                title="Prepare WhatsApp message"
+                            >
+                                📱 Open WhatsApp
+                            </button>
+                        </div>
+                    )}
+
+                    {/* Disclaimer in presentation mode */}
+                    {presentationMode && (
+                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4 text-sm text-amber-800">
+                            <strong>Important:</strong> This treatment plan is an estimate and does not represent a final invoice.
+                            Final charges may change after clinical evaluation.
+                        </div>
+                    )}
 
                     {/* Tooth Chart Visualization */}
                     {!presentationMode && plannedTeeth.length > 0 && (
