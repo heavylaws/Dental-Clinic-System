@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { api } from "../../lib/api";
+import ToothChart, { AREA_OPTIONS, PROCEDURE_PRESETS } from "./ToothChart";
 
 interface Props {
     patientId: string;
@@ -59,6 +60,7 @@ export function TreatmentPlanBuilder({ patientId }: Props) {
     const [plansData, setPlansData] = useState<TreatmentPlansResponse | null>(null);
     const [loading, setLoading] = useState(true);
     const [expandedPlanId, setExpandedPlanId] = useState<string | null>(null);
+    const [presentationMode, setPresentationMode] = useState(false);
 
     useEffect(() => {
         loadPlans();
@@ -96,21 +98,40 @@ export function TreatmentPlanBuilder({ patientId }: Props) {
 
     return (
         <div className="space-y-6">
-            <div className="flex justify-between items-center bg-white p-4 rounded-lg shadow-sm border border-gray-100">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-4 rounded-lg shadow-sm border border-gray-100">
                 <div>
                     <h2 className="text-xl font-semibold flex items-center gap-2">
                         📋 Treatment Plans
                     </h2>
                     <p className="text-sm text-gray-500 mt-1">
-                        Estimates do NOT affect Account Ledger until converted to billing
+                        Treatment plan estimates do NOT affect the patient ledger until converted to billing.
+                    </p>
+                    <p className="text-xs text-amber-600 mt-0.5">
+                        Accepted treatment is not automatically billed.
                     </p>
                 </div>
-                <button
-                    onClick={createPlan}
-                    className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 shadow-sm font-medium"
-                >
-                    + New Plan
-                </button>
+                <div className="flex items-center gap-2">
+                    {plans.length > 0 && (
+                        <button
+                            onClick={() => setPresentationMode(!presentationMode)}
+                            className={`px-3 py-2 text-sm rounded-md font-medium transition ${
+                                presentationMode
+                                    ? "bg-blue-100 text-blue-700 hover:bg-blue-200"
+                                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                            }`}
+                        >
+                            {presentationMode ? "🖥️ Exit Presentation" : "🖥️ Presentation Mode"}
+                        </button>
+                    )}
+                    {!presentationMode && (
+                        <button
+                            onClick={createPlan}
+                            className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 shadow-sm font-medium"
+                        >
+                            + New Plan
+                        </button>
+                    )}
+                </div>
             </div>
 
             {plans.length === 0 ? (
@@ -120,7 +141,7 @@ export function TreatmentPlanBuilder({ patientId }: Props) {
                     <p className="text-sm mt-1">Click "New Plan" to create a treatment plan</p>
                 </div>
             ) : (
-                <div className="space-y-4">
+                <div className={`space-y-4 ${presentationMode ? "max-w-4xl mx-auto" : ""}`}>
                     {plans.map((planData) => (
                         <TreatmentPlanCard
                             key={planData.plan.id}
@@ -128,6 +149,7 @@ export function TreatmentPlanBuilder({ patientId }: Props) {
                             expanded={expandedPlanId === planData.plan.id}
                             onToggle={() => setExpandedPlanId(expandedPlanId === planData.plan.id ? null : planData.plan.id)}
                             onUpdate={loadPlans}
+                            presentationMode={presentationMode}
                         />
                     ))}
                 </div>
@@ -141,15 +163,19 @@ function TreatmentPlanCard({
     expanded,
     onToggle,
     onUpdate,
+    presentationMode = false,
 }: {
     planData: TreatmentPlanData;
     expanded: boolean;
     onToggle: () => void;
     onUpdate: () => Promise<void>;
+    presentationMode?: boolean;
 }) {
     const { plan, items, summary } = planData;
     const [addingItem, setAddingItem] = useState(false);
     const [editingItem, setEditingItem] = useState<TreatmentPlanItem | null>(null);
+    const [selectedTooth, setSelectedTooth] = useState<string | null>(null);
+    const [showToothChart, setShowToothChart] = useState(false);
     const [newItem, setNewItem] = useState({
         tooth: "",
         area: "",
@@ -160,6 +186,31 @@ function TreatmentPlanCard({
         priority: "medium" as Priority,
         notes: "",
     });
+
+    // Calculate planned teeth for the chart visualization
+    const plannedTeeth = useMemo(() => {
+        const toothMap = new Map<string, { status: ItemStatus; count: number }>();
+        items.forEach((item) => {
+            if (item.tooth) {
+                const existing = toothMap.get(item.tooth);
+                if (existing) {
+                    existing.count++;
+                    // Priority: completed > accepted > proposed > declined > cancelled
+                    const priority = { completed: 4, accepted: 3, proposed: 2, declined: 1, cancelled: 0 };
+                    if (priority[item.status] > priority[existing.status]) {
+                        existing.status = item.status;
+                    }
+                } else {
+                    toothMap.set(item.tooth, { status: item.status, count: 1 });
+                }
+            }
+        });
+        return Array.from(toothMap.entries()).map(([tooth, data]) => ({
+            tooth,
+            status: data.status,
+            count: data.count,
+        }));
+    }, [items]);
 
     const formatCurrency = (val: number) => {
         return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(val);
@@ -208,6 +259,32 @@ function TreatmentPlanCard({
         }
     };
 
+    // Apply procedure preset
+    const applyPreset = (preset: typeof PROCEDURE_PRESETS[0]) => {
+        setNewItem({
+            ...newItem,
+            procedureName: preset.name,
+            category: preset.category,
+            estimatedCost: String(preset.defaultCost),
+        });
+    };
+
+    // Handle tooth selection from chart
+    const handleToothSelect = (tooth: string | null) => {
+        setSelectedTooth(tooth);
+        if (tooth) {
+            setNewItem({ ...newItem, tooth });
+            // Auto-suggest area based on tooth
+            const toothNum = parseInt(tooth);
+            if (toothNum >= 11 && toothNum <= 18) setNewItem({ ...newItem, tooth, area: "Upper Right" });
+            else if (toothNum >= 21 && toothNum <= 28) setNewItem({ ...newItem, tooth, area: "Upper Left" });
+            else if (toothNum >= 31 && toothNum <= 38) setNewItem({ ...newItem, tooth, area: "Lower Left" });
+            else if (toothNum >= 41 && toothNum <= 48) setNewItem({ ...newItem, tooth, area: "Lower Right" });
+        } else {
+            setNewItem({ ...newItem, tooth: "" });
+        }
+    };
+
     const handleAddItem = async () => {
         if (!newItem.procedureName.trim()) {
             alert("Procedure name is required");
@@ -220,18 +297,27 @@ function TreatmentPlanCard({
             return;
         }
 
+        // Validation: require tooth OR area
+        if (!newItem.tooth.trim() && !newItem.area) {
+            alert("Please select a tooth or specify an area");
+            setShowToothChart(true);
+            return;
+        }
+
         try {
             await api.treatmentPlans.addItem(plan.id, {
-                tooth: newItem.tooth,
-                area: newItem.area,
+                tooth: newItem.tooth || undefined,
+                area: newItem.area || undefined,
                 procedureName: newItem.procedureName.trim(),
-                category: newItem.category,
-                description: newItem.description,
+                category: newItem.category || undefined,
+                description: newItem.description || undefined,
                 estimatedCost: cost,
                 priority: newItem.priority,
-                notes: newItem.notes,
+                notes: newItem.notes || undefined,
             });
             setAddingItem(false);
+            setShowToothChart(false);
+            setSelectedTooth(null);
             setNewItem({
                 tooth: "",
                 area: "",
@@ -350,9 +436,9 @@ function TreatmentPlanCard({
 
             {/* Expanded Content */}
             {expanded && (
-                <div className="p-4">
+                <div className={`p-4 ${presentationMode ? "bg-white" : ""}`}>
                     {/* Summary Cards */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                    <div className={`grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 ${presentationMode ? "print:grid-cols-4" : ""}`}>
                         <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
                             <p className="text-xs text-gray-500 uppercase">Proposed</p>
                             <p className="text-lg font-bold text-gray-700">{formatCurrency(summary.proposedTotal)}</p>
@@ -371,6 +457,18 @@ function TreatmentPlanCard({
                         </div>
                     </div>
 
+                    {/* Tooth Chart Visualization */}
+                    {!presentationMode && plannedTeeth.length > 0 && (
+                        <div className="mb-4">
+                            <h4 className="text-sm font-semibold text-gray-700 mb-2">Treatment Overview by Tooth</h4>
+                            <ToothChart
+                                selectedTooth={selectedTooth}
+                                onSelectTooth={handleToothSelect}
+                                plannedTeeth={plannedTeeth}
+                            />
+                        </div>
+                    )}
+
                     {/* Items Table */}
                     {items.length > 0 ? (
                         <div className="overflow-x-auto mb-4">
@@ -382,15 +480,15 @@ function TreatmentPlanCard({
                                         <th className="pb-2">Priority</th>
                                         <th className="pb-2">Status</th>
                                         <th className="pb-2 text-right">Cost</th>
-                                        <th className="pb-2 text-center">Actions</th>
+                                        {!presentationMode && <th className="pb-2 text-center">Actions</th>}
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
                                     {items.map((item) => (
                                         <tr key={item.id} className={item.status === "cancelled" ? "opacity-60" : ""}>
                                             <td className="py-2">
-                                                <div className="font-medium text-gray-900">{item.tooth || "—"}</div>
-                                                {item.area && <div className="text-xs text-gray-500">{item.area}</div>}
+                                                <div className="font-medium text-gray-900">{item.tooth || item.area || "—"}</div>
+                                                {item.tooth && item.area && <div className="text-xs text-gray-500">{item.area}</div>}
                                             </td>
                                             <td className="py-2">
                                                 <div className="text-gray-900 font-medium">{item.procedureName}</div>
@@ -403,39 +501,47 @@ function TreatmentPlanCard({
                                                 </span>
                                             </td>
                                             <td className="py-2">
-                                                <select
-                                                    value={item.status}
-                                                    onChange={(e) => updateItemStatus(item, e.target.value as ItemStatus)}
-                                                    className={`text-xs px-2 py-1 rounded border-0 ${getItemStatusColor(item.status)}`}
-                                                >
-                                                    <option value="proposed">Proposed</option>
-                                                    <option value="accepted">Accepted</option>
-                                                    <option value="declined">Declined</option>
-                                                    <option value="completed">Completed</option>
-                                                    <option value="cancelled">Cancelled</option>
-                                                </select>
+                                                {presentationMode ? (
+                                                    <span className={`text-xs px-2 py-1 rounded ${getItemStatusColor(item.status)}`}>
+                                                        {item.status.charAt(0).toUpperCase() + item.status.slice(1)}
+                                                    </span>
+                                                ) : (
+                                                    <select
+                                                        value={item.status}
+                                                        onChange={(e) => updateItemStatus(item, e.target.value as ItemStatus)}
+                                                        className={`text-xs px-2 py-1 rounded border-0 ${getItemStatusColor(item.status)}`}
+                                                    >
+                                                        <option value="proposed">Proposed</option>
+                                                        <option value="accepted">Accepted</option>
+                                                        <option value="declined">Declined</option>
+                                                        <option value="completed">Completed</option>
+                                                        <option value="cancelled">Cancelled</option>
+                                                    </select>
+                                                )}
                                             </td>
                                             <td className="py-2 text-right font-medium text-gray-900">
                                                 {formatCurrency(item.estimatedCost)}
                                             </td>
-                                            <td className="py-2 text-center">
-                                                <div className="flex justify-center gap-1">
-                                                    <button
-                                                        onClick={() => setEditingItem(item)}
-                                                        className="text-blue-600 hover:bg-blue-50 px-2 py-1 rounded text-xs"
-                                                        title="Edit"
-                                                    >
-                                                        ✏️
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleDeleteItem(item)}
-                                                        className="text-red-500 hover:bg-red-50 px-2 py-1 rounded text-xs"
-                                                        title="Delete/Cancel"
-                                                    >
-                                                        🗑️
-                                                    </button>
-                                                </div>
-                                            </td>
+                                            {!presentationMode && (
+                                                <td className="py-2 text-center">
+                                                    <div className="flex justify-center gap-1">
+                                                        <button
+                                                            onClick={() => setEditingItem(item)}
+                                                            className="text-blue-600 hover:bg-blue-50 px-2 py-1 rounded text-xs"
+                                                            title="Edit"
+                                                        >
+                                                            ✏️
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleDeleteItem(item)}
+                                                            className="text-red-500 hover:bg-red-50 px-2 py-1 rounded text-xs"
+                                                            title="Delete/Cancel"
+                                                        >
+                                                            🗑️
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            )}
                                         </tr>
                                     ))}
                                 </tbody>
@@ -448,7 +554,7 @@ function TreatmentPlanCard({
                     )}
 
                     {/* Add Item Button */}
-                    {!addingItem && !editingItem && (
+                    {!presentationMode && !addingItem && !editingItem && (
                         <button
                             onClick={() => setAddingItem(true)}
                             className="w-full py-2 border-2 border-dashed border-gray-300 rounded-lg text-gray-500 hover:border-primary-400 hover:text-primary-600 transition font-medium"
@@ -461,6 +567,44 @@ function TreatmentPlanCard({
                     {addingItem && (
                         <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 mt-4">
                             <h4 className="font-semibold text-gray-800 mb-3">Add Treatment Item</h4>
+
+                            {/* Procedure Presets */}
+                            <div className="mb-4">
+                                <label className="block text-xs text-gray-500 mb-2">Quick Select Procedure</label>
+                                <div className="flex flex-wrap gap-2">
+                                    {PROCEDURE_PRESETS.map((preset) => (
+                                        <button
+                                            key={preset.name}
+                                            type="button"
+                                            onClick={() => applyPreset(preset)}
+                                            className="px-3 py-1.5 text-xs bg-white border border-gray-300 rounded-md hover:border-primary-400 hover:text-primary-600 transition"
+                                        >
+                                            {preset.name}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Tooth Chart Toggle */}
+                            <div className="mb-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowToothChart(!showToothChart)}
+                                    className="text-sm text-primary-600 hover:text-primary-700 font-medium flex items-center gap-1"
+                                >
+                                    {showToothChart ? "▼" : "▶"} Select Tooth from Chart
+                                </button>
+                                {showToothChart && (
+                                    <div className="mt-2">
+                                        <ToothChart
+                                            selectedTooth={selectedTooth}
+                                            onSelectTooth={handleToothSelect}
+                                            plannedTeeth={plannedTeeth}
+                                        />
+                                    </div>
+                                )}
+                            </div>
+
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
                                 <div>
                                     <label className="block text-xs text-gray-500 mb-1">Procedure Name *</label>
@@ -485,24 +629,46 @@ function TreatmentPlanCard({
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-xs text-gray-500 mb-1">Tooth</label>
-                                    <input
-                                        type="text"
-                                        className="w-full border-gray-300 rounded-md shadow-sm text-sm px-3 py-2"
-                                        placeholder="e.g., 18 or UR6"
-                                        value={newItem.tooth}
-                                        onChange={(e) => setNewItem({ ...newItem, tooth: e.target.value })}
-                                    />
+                                    <label className="block text-xs text-gray-500 mb-1">Tooth (FDI notation)</label>
+                                    <div className="flex gap-2">
+                                        <input
+                                            type="text"
+                                            className="w-full border-gray-300 rounded-md shadow-sm text-sm px-3 py-2"
+                                            placeholder="e.g., 18"
+                                            value={newItem.tooth}
+                                            onChange={(e) => {
+                                                setNewItem({ ...newItem, tooth: e.target.value });
+                                                setSelectedTooth(e.target.value || null);
+                                            }}
+                                        />
+                                        {newItem.tooth && (
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setNewItem({ ...newItem, tooth: "" });
+                                                    setSelectedTooth(null);
+                                                }}
+                                                className="px-2 py-1 text-xs text-gray-500 hover:text-gray-700"
+                                                title="Clear tooth"
+                                            >
+                                                ✕
+                                            </button>
+                                        )}
+                                    </div>
                                 </div>
                                 <div>
-                                    <label className="block text-xs text-gray-500 mb-1">Area</label>
-                                    <input
-                                        type="text"
+                                    <label className="block text-xs text-gray-500 mb-1">
+                                        Area {newItem.tooth ? "(optional)" : "(select tooth or area)"}
+                                    </label>
+                                    <select
                                         className="w-full border-gray-300 rounded-md shadow-sm text-sm px-3 py-2"
-                                        placeholder="e.g., Upper Right"
                                         value={newItem.area}
                                         onChange={(e) => setNewItem({ ...newItem, area: e.target.value })}
-                                    />
+                                    >
+                                        {AREA_OPTIONS.map((opt) => (
+                                            <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                        ))}
+                                    </select>
                                 </div>
                                 <div>
                                     <label className="block text-xs text-gray-500 mb-1">Category</label>
@@ -591,7 +757,7 @@ function TreatmentPlanCard({
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-xs text-gray-500 mb-1">Tooth</label>
+                                    <label className="block text-xs text-gray-500 mb-1">Tooth (FDI notation)</label>
                                     <input
                                         type="text"
                                         className="w-full border-gray-300 rounded-md shadow-sm text-sm px-3 py-2"
@@ -601,12 +767,15 @@ function TreatmentPlanCard({
                                 </div>
                                 <div>
                                     <label className="block text-xs text-gray-500 mb-1">Area</label>
-                                    <input
-                                        type="text"
+                                    <select
                                         className="w-full border-gray-300 rounded-md shadow-sm text-sm px-3 py-2"
                                         value={editingItem.area || ""}
-                                        onChange={(e) => setEditingItem({ ...editingItem, area: e.target.value })}
-                                    />
+                                        onChange={(e) => setEditingItem({ ...editingItem, area: e.target.value || undefined })}
+                                    >
+                                        {AREA_OPTIONS.map((opt) => (
+                                            <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                        ))}
+                                    </select>
                                 </div>
                                 <div>
                                     <label className="block text-xs text-gray-500 mb-1">Category</label>

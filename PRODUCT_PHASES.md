@@ -2135,13 +2135,198 @@ api.treatmentPlans.deleteItem(itemId) → Promise<{ success, message, item? }>
 
 ### Known Limitations
 
-- **No tooth chart UI yet** — Phase 7B
+- **No tooth chart UI yet** — Phase 7B ✅
 - **No conversion to visit/billing yet** — Phase 7C
 - **No treatment plan print/share yet** — Phase 7D
 - **In-memory/demo persistence only** — data resets on server restart
 - **Mobile treatment plan UI deferred** — desktop only
 - **No audit trail** — production needs item history tracking
 - **No procedure catalog integration** — future enhancement
+
+---
+
+## Phase 7B — Treatment Plan UI + Tooth Chart Integration
+
+**Status:** ✅ COMPLETE
+
+### Goal
+
+Improve the treatment planning user experience with a visual tooth chart and better item workflow. Make treatment plan item creation feel dental-specific by adding visual tooth/area selection and better plan presentation.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `client/src/components/patient/ToothChart.tsx` | New — Visual tooth chart component with FDI notation |
+| `client/src/components/patient/TreatmentPlanBuilder.tsx` | Updated with tooth chart integration, procedure presets, area selector, presentation mode |
+| `PRODUCT_PHASES.md` | This entry |
+
+### Tooth Chart Component
+
+**Location:** `client/src/components/patient/ToothChart.tsx`
+
+**Features:**
+- FDI World Dental Federation notation (adult teeth)
+  - Upper Right: 18–11
+  - Upper Left: 21–28
+  - Lower Left: 31–38
+  - Lower Right: 48–41
+- Visual tooth buttons arranged in dental arch layout
+- Selected tooth highlighting (blue ring + scale effect)
+- Hover states for better UX
+- Planned teeth markers with status colors:
+  - Yellow = Proposed
+  - Emerald = Accepted
+  - Blue = Completed
+  - Gray = Declined/Cancelled
+- Multi-item indicator (red badge with count)
+- Legend explaining marker colors
+- Responsive design (smaller on mobile, larger on desktop)
+
+**Exports:**
+- `ToothChart` — Main component
+- `AREA_OPTIONS` — Area/quadrant dropdown options
+- `PROCEDURE_PRESETS` — Quick-select procedure templates
+- `getTeethForArea(area)` — Helper to get tooth numbers for an area
+- `isValidTooth(tooth)` — Helper to validate FDI tooth numbers
+
+### Area/Quadrant Selection
+
+**Area Options:**
+- — Select Area — (empty)
+- Upper Arch
+- Lower Arch
+- Upper Right
+- Upper Left
+- Lower Right
+- Lower Left
+- Full Mouth
+- Anterior
+- Posterior
+- Other
+
+**Behavior:**
+- Area selector is a dropdown in both Add and Edit forms
+- When tooth is selected from chart, area auto-populates based on tooth quadrant
+- If tooth is selected, area becomes optional
+- If no tooth is selected, area should be specified
+- Validation requires tooth OR area
+
+### Procedure Presets
+
+**Available Presets:**
+| Procedure | Category | Default Cost |
+|-----------|----------|--------------|
+| Composite Filling | Restorative | $150 |
+| Root Canal Treatment | Endodontics | $800 |
+| Crown (Porcelain) | Prosthodontics | $1,200 |
+| Extraction | Oral Surgery | $200 |
+| Professional Cleaning | Preventive | $120 |
+| Teeth Whitening | Cosmetic | $400 |
+| Dental Implant | Implantology | $3,000 |
+| Complete Denture | Prosthodontics | $2,500 |
+| Orthodontic Consultation | Orthodontics | $100 |
+| Periodontal Scaling | Periodontics | $250 |
+
+**Behavior:**
+- Presets displayed as clickable buttons in Add Item form
+- Clicking preset fills procedureName, category, and estimatedCost
+- User can still edit all fields after selecting preset
+- Safe default values that user can override
+
+### Treatment Item Creation UX Improvements
+
+**Add Item Form Enhancements:**
+1. **Procedure Presets** — Quick-select buttons at top
+2. **Tooth Chart Toggle** — Expandable tooth chart for visual selection
+3. **Tooth Input** — Text field with clear button, syncs with chart
+4. **Area Selector** — Dropdown instead of free text
+5. **Validation** — Requires tooth OR area, procedure name, and valid cost
+
+**Edit Item Form:**
+- Same area selector dropdown
+- Tooth field labeled with "FDI notation" hint
+- All other fields preserved from Phase 7A
+
+### Presentation Mode
+
+**Purpose:** Cleaner view for explaining a plan to the patient
+
+**Activation:** "🖥️ Presentation Mode" button in header
+
+**In Presentation Mode:**
+- Edit/Delete buttons hidden
+- Item status shown as read-only badges (not dropdowns)
+- Actions column hidden in table
+- "Add Item" button hidden
+- Plan list centered with max-width
+- All financial data still visible
+- Plan status dropdown still available for quick updates
+
+**Exit:** "🖥️ Exit Presentation" button in header
+
+### Plan Presentation Polish
+
+**Summary Cards:**
+- Proposed (gray)
+- Accepted (emerald)
+- Completed (blue)
+- Remaining (amber)
+
+**Items Table Improvements:**
+- Tooth/Area column shows tooth OR area (whichever is set)
+- If both tooth and area set, both displayed
+- Status shown as colored badge
+- Priority color-coded (urgent=rose, high=orange, medium=amber, low=gray)
+
+**Tooth Chart in Plan:**
+- Displayed when plan has items with teeth
+- Shows treatment markers on affected teeth
+- Clicking tooth auto-fills tooth in Add Item form
+- Updates dynamically as items are added
+
+### Financial Non-Impact Confirmation
+
+**Treatment plans do NOT affect:**
+- Patient ledger balance
+- Account Ledger entries
+- Billing totals
+- Payment plan calculations
+- Aging calculations
+- Dashboard outstanding amounts
+- Reports outstanding amounts
+
+**UI Messaging:**
+- Header: "Treatment plan estimates do NOT affect the patient ledger until converted to billing."
+- Sub-header: "Accepted treatment is not automatically billed."
+- No ledger refetch when treatment plan changes
+
+### Mobile Decision
+
+**No mobile changes.**
+
+- Mobile tooth chart UI deferred to Phase 7C or later
+- Mobile treatment plan UI deferred
+- Mobile `/m` and `/m/appointments` must still build and run
+- No mobile file modifications
+
+### Build Results
+
+| Command | Result |
+|---------|--------|
+| `npx tsc --noEmit` | ✅ exit 0 |
+| `npx vite build` | ✅ no errors |
+| `npx tsc -p tsconfig.server.json` | ✅ exit 0 |
+
+### Known Limitations
+
+- **No conversion to visit/billing yet** — Phase 7C
+- **No treatment plan PDF/share yet** — Phase 7D
+- **No mobile tooth chart UI** — desktop only
+- **Tooth chart is lightweight UI** — not full odontogram with surfaces
+- **Multi-surface tooth markings deferred** — single tooth only
+- **In-memory/demo persistence only** — data resets on server restart
+- **No audit trail** — production needs item history tracking
 
 ---
 
