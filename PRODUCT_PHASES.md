@@ -2320,13 +2320,214 @@ Improve the treatment planning user experience with a visual tooth chart and bet
 
 ### Known Limitations
 
-- **No conversion to visit/billing yet** — Phase 7C
+- **No conversion to visit/billing yet** — Phase 7C ✅
 - **No treatment plan PDF/share yet** — Phase 7D
 - **No mobile tooth chart UI** — desktop only
 - **Tooth chart is lightweight UI** — not full odontogram with surfaces
 - **Multi-surface tooth markings deferred** — single tooth only
 - **In-memory/demo persistence only** — data resets on server restart
 - **No audit trail** — production needs item history tracking
+
+---
+
+## Phase 7C — Convert Accepted Treatment Plan Items to Visit/Billing
+
+**Status:** ✅ COMPLETE
+
+### Goal
+
+Enable staff to convert accepted treatment plan items into real clinical/financial records (visits and billing). This is the first phase where treatment plans impact the ledger.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `server/modules/treatment_plan/index.ts` | Extended TreatmentPlanItem model with conversion fields; added POST /items/:itemId/convert endpoint |
+| `client/src/lib/api.ts` | Added `api.treatmentPlans.convertItem()` method |
+| `client/src/components/patient/TreatmentPlanBuilder.tsx` | Added conversion UI: Convert button, Converted badge, conversion modal |
+| `PRODUCT_PHASES.md` | This entry |
+
+### Backend Changes
+
+#### Extended TreatmentPlanItem Model
+
+Added conversion tracking fields:
+```typescript
+convertedAt?: string | null;
+convertedVisitId?: string | null;
+convertedBillingId?: string | null;
+```
+
+#### Conversion Endpoint
+
+**POST** `/api/treatment-plans/items/:itemId/convert`
+
+**Body:**
+```json
+{
+  "visitDate": "2026-05-12",
+  "doctorId": "optional-doctor-id",
+  "notes": "Optional additional notes"
+}
+```
+
+**Behavior:**
+1. Validates item exists (404 if not found)
+2. Validates parent plan exists (404 if not found)
+3. Validates patient exists (404 if not found)
+4. Validates item status is "accepted" only (400 if proposed/declined/cancelled)
+5. **Idempotency check:** Rejects if already converted (409 with existing refs)
+6. Validates estimatedCost >= 0
+7. Creates visit record with:
+   - visitType: "treatment"
+   - chiefComplaint: `{procedureName} — {tooth/area}`
+   - clinicalNotes: Full reference to treatment plan item
+   - status: "completed"
+   - dentalProcedures: Array with converted procedure
+8. Creates billing record with:
+   - totalAmount: item.estimatedCost
+   - status: "unpaid" (or "paid" if zero-cost)
+   - notes: Clear conversion reference with tooth/area
+   - sourceType/sourceId: For audit trail
+9. Updates item:
+   - status: "completed"
+   - convertedAt: ISO timestamp
+   - convertedVisitId: visit.id
+   - convertedBillingId: billing.id
+10. Returns success with item, visit, and billing summaries
+
+**Error Responses:**
+- 404: Item, plan, or patient not found
+- 400: Item not accepted, or invalid cost
+- 409: Item already converted (idempotency)
+- 500: Conversion failed (with rollback attempt)
+
+### Idempotency / Duplicate Prevention
+
+**Before creating any records:**
+- Checks if `item.convertedVisitId` or `item.convertedBillingId` exists
+- If already converted → returns HTTP 409 with existing references
+- Client shows: "Already converted: This item has already been converted. Cannot convert twice."
+
+**Partial Failure Safety:**
+- All validation happens before any mutations
+- Visit and billing prepared first, then pushed
+- Only then item is updated
+- If error occurs before mutations → no data changed
+- If error after mutations → best-effort rollback removes created visit/billing
+
+### Ledger Impact
+
+**Treatment plan conversion creates real financial records:**
+- Billing record added to `demoBillings`
+- Visit record added to `demoVisits`
+- Ledger automatically includes new billing via existing ledger computation
+- Patient ledger balance increases by `estimatedCost`
+
+**This is the only phase where treatment plans affect:**
+- Patient ledger balance
+- Account ledger entries
+- Billing totals
+- Dashboard outstanding amounts
+
+### Client API Changes
+
+```typescript
+api.treatmentPlans.convertItem(itemId, {
+  visitDate?: string;
+  doctorId?: string;
+  notes?: string;
+}): Promise<{
+  success: boolean;
+  message: string;
+  item: { id, status, convertedAt, convertedVisitId, convertedBillingId, ... };
+  visit: { id, visitNumber, startedAt, status };
+  billing: { id, totalAmount, status, notes };
+}>
+```
+
+### Desktop UI Changes
+
+#### Items Table Enhancements
+
+**Convert Button (for accepted, not-converted items):**
+- Shows "🔄 Convert" button in emerald styling
+- Only appears for items with status === "accepted"
+- Only appears if not already converted (no convertedAt/convertedVisitId)
+
+**Converted Badge (for converted items):**
+- Shows "✓ Converted" badge in blue styling
+- Title attribute shows Visit ID and Billing ID for reference
+- Appears for any item with convertedAt or convertedVisitId
+
+#### Conversion Modal
+
+**Opens when clicking "🔄 Convert" button:**
+- Shows procedure name, tooth/area, and cost
+- **Warning banner:** "This will create a real visit and billing charge. This action cannot be undone or performed twice."
+- **Visit Date:** Date picker, defaults to today
+- **Doctor ID:** Optional text input
+- **Additional Notes:** Optional textarea for visit notes
+- **Cancel button:** Closes modal without action
+- **Confirm Conversion button:** Executes conversion
+
+**On Success:**
+- Alert: "Successfully converted to Visit #N and Billing [status]"
+- Modal closes
+- Treatment plans refetch (shows converted badge)
+- Item status changes to "completed"
+
+**On Error:**
+- 409 (Already converted): Shows "Already converted: [message]"
+- 400 (Cannot convert): Shows "Cannot convert: [message]"
+- Other errors: Shows error message
+
+### Conversion Rules Summary
+
+| Item Status | Convertible | UI Behavior |
+|-------------|-------------|-------------|
+| proposed | ❌ No | No Convert button |
+| accepted | ✅ Yes | Shows "🔄 Convert" button |
+| declined | ❌ No | No Convert button |
+| cancelled | ❌ No | No Convert button |
+| completed | ❌ No | Shows "✓ Converted" badge if converted |
+
+### Zero-Cost Items
+
+**Allowed:** Yes, if estimatedCost = 0
+
+**Behavior:**
+- Visit still created (for clinical record)
+- Billing created with totalAmount = "0"
+- Billing status = "paid" (auto-paid since no charge)
+- Ledger impact: $0 (no balance change)
+
+### Mobile Decision
+
+**No mobile changes.**
+
+- Desktop conversion workflow is priority
+- Mobile conversion UI deferred
+- Mobile `/m` and `/m/appointments` must still build and run
+- No mobile file modifications
+
+### Build Results
+
+| Command | Result |
+|---------|--------|
+| `npx tsc --noEmit` | ✅ exit 0 |
+| `npx vite build` | ✅ no errors |
+| `npx tsc -p tsconfig.server.json` | ✅ exit 0 |
+
+### Known Limitations
+
+- **Demo/in-memory conversion only** — data resets on server restart
+- **No transaction safety beyond in-memory** — best-effort rollback only
+- **Mobile conversion UI deferred** — desktop only
+- **Treatment plan PDF/share remains Phase 7D**
+- **No database source references** — production needs sourceType/sourceId columns
+- **No audit trail** — production needs conversion history logging
+- **Doctor ID free text** — production needs doctor selector from users table
 
 ---
 

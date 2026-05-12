@@ -25,6 +25,10 @@ interface TreatmentPlanItem {
     notes?: string;
     createdAt: string;
     updatedAt: string;
+    // Phase 7C: Conversion tracking
+    convertedAt?: string | null;
+    convertedVisitId?: string | null;
+    convertedBillingId?: string | null;
 }
 
 interface PlanSummary {
@@ -174,6 +178,12 @@ function TreatmentPlanCard({
     const { plan, items, summary } = planData;
     const [addingItem, setAddingItem] = useState(false);
     const [editingItem, setEditingItem] = useState<TreatmentPlanItem | null>(null);
+    const [convertingItem, setConvertingItem] = useState<TreatmentPlanItem | null>(null);
+    const [convertForm, setConvertForm] = useState({
+        visitDate: new Date().toISOString().split("T")[0],
+        doctorId: "",
+        notes: "",
+    });
     const [selectedTooth, setSelectedTooth] = useState<string | null>(null);
     const [showToothChart, setShowToothChart] = useState(false);
     const [newItem, setNewItem] = useState({
@@ -387,6 +397,46 @@ function TreatmentPlanCard({
         }
     };
 
+    // Phase 7C: Convert accepted item to visit/billing
+    const handleConvertItem = async () => {
+        if (!convertingItem) return;
+
+        try {
+            const result = await api.treatmentPlans.convertItem(convertingItem.id, {
+                visitDate: convertForm.visitDate || undefined,
+                doctorId: convertForm.doctorId || undefined,
+                notes: convertForm.notes || undefined,
+            });
+
+            alert(`Successfully converted to Visit #${result.visit.visitNumber} and Billing ${result.billing.status}`);
+            setConvertingItem(null);
+            setConvertForm({
+                visitDate: new Date().toISOString().split("T")[0],
+                doctorId: "",
+                notes: "",
+            });
+            await onUpdate();
+        } catch (error: any) {
+            const message = error?.message || "Failed to convert item";
+            if (error?.status === 409) {
+                alert(`Already converted: ${message}`);
+            } else if (error?.status === 400) {
+                alert(`Cannot convert: ${message}`);
+            } else {
+                alert(message);
+            }
+        }
+    };
+
+    const openConvertModal = (item: TreatmentPlanItem) => {
+        setConvertingItem(item);
+        setConvertForm({
+            visitDate: new Date().toISOString().split("T")[0],
+            doctorId: "",
+            notes: "",
+        });
+    };
+
     return (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
             {/* Header - Always visible */}
@@ -524,7 +574,23 @@ function TreatmentPlanCard({
                                             </td>
                                             {!presentationMode && (
                                                 <td className="py-2 text-center">
-                                                    <div className="flex justify-center gap-1">
+                                                    <div className="flex justify-center gap-1 flex-wrap">
+                                                        {/* Convert button for accepted, not-converted items */}
+                                                        {item.status === "accepted" && !item.convertedAt && (
+                                                            <button
+                                                                onClick={() => openConvertModal(item)}
+                                                                className="bg-emerald-100 text-emerald-700 hover:bg-emerald-200 px-2 py-1 rounded text-xs font-medium"
+                                                                title="Convert to Visit/Billing"
+                                                            >
+                                                                🔄 Convert
+                                                            </button>
+                                                        )}
+                                                        {/* Converted badge for converted items */}
+                                                        {(item.convertedAt || item.convertedVisitId) && (
+                                                            <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs font-medium" title={`Visit: ${item.convertedVisitId || "N/A"}, Billing: ${item.convertedBillingId || "N/A"}`}>
+                                                                ✓ Converted
+                                                            </span>
+                                                        )}
                                                         <button
                                                             onClick={() => setEditingItem(item)}
                                                             className="text-blue-600 hover:bg-blue-50 px-2 py-1 rounded text-xs"
@@ -845,6 +911,80 @@ function TreatmentPlanCard({
                                 >
                                     Save Changes
                                 </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Phase 7C: Convert Item Modal */}
+                    {convertingItem && (
+                        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                            <div className="bg-white rounded-xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+                                <div className="p-6">
+                                    <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                                        Convert to Visit/Billing
+                                    </h3>
+                                    <p className="text-sm text-gray-600 mb-4">
+                                        <strong className="text-gray-900">{convertingItem.procedureName}</strong>
+                                        {convertingItem.tooth && <span> — Tooth {convertingItem.tooth}</span>}
+                                        {convertingItem.area && !convertingItem.tooth && <span> — {convertingItem.area}</span>}
+                                        <br />
+                                        <span className="text-emerald-600 font-medium">{formatCurrency(convertingItem.estimatedCost)}</span>
+                                    </p>
+
+                                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
+                                        <p className="text-sm text-amber-800">
+                                            <strong>⚠️ Warning:</strong> This will create a real visit and billing charge.
+                                            This action cannot be undone or performed twice for the same item.
+                                        </p>
+                                    </div>
+
+                                    <div className="space-y-3 mb-4">
+                                        <div>
+                                            <label className="block text-xs text-gray-500 mb-1">Visit Date</label>
+                                            <input
+                                                type="date"
+                                                className="w-full border-gray-300 rounded-md shadow-sm text-sm px-3 py-2"
+                                                value={convertForm.visitDate}
+                                                onChange={(e) => setConvertForm({ ...convertForm, visitDate: e.target.value })}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs text-gray-500 mb-1">Doctor ID (optional)</label>
+                                            <input
+                                                type="text"
+                                                className="w-full border-gray-300 rounded-md shadow-sm text-sm px-3 py-2"
+                                                placeholder="Doctor ID or leave empty"
+                                                value={convertForm.doctorId}
+                                                onChange={(e) => setConvertForm({ ...convertForm, doctorId: e.target.value })}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs text-gray-500 mb-1">Additional Notes (optional)</label>
+                                            <textarea
+                                                className="w-full border-gray-300 rounded-md shadow-sm text-sm px-3 py-2"
+                                                rows={2}
+                                                placeholder="Notes for the visit record"
+                                                value={convertForm.notes}
+                                                onChange={(e) => setConvertForm({ ...convertForm, notes: e.target.value })}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="flex justify-end gap-2">
+                                        <button
+                                            onClick={() => setConvertingItem(null)}
+                                            className="px-4 py-2 text-sm border rounded-md text-gray-600 bg-white hover:bg-gray-50"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            onClick={handleConvertItem}
+                                            className="px-4 py-2 text-sm bg-emerald-600 text-white rounded-md hover:bg-emerald-700 font-medium"
+                                        >
+                                            Confirm Conversion
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     )}

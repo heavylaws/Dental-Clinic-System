@@ -1017,6 +1017,43 @@ export const api = {
                     method: "DELETE",
                 }
             ),
+        // Phase 7C: Convert accepted treatment plan item to visit/billing
+        convertItem: (
+            itemId: string,
+            payload: {
+                visitDate?: string;
+                doctorId?: string;
+                notes?: string;
+            }
+        ) =>
+            request<{
+                success: boolean;
+                message: string;
+                item: {
+                    id: string;
+                    status: string;
+                    convertedAt: string;
+                    convertedVisitId: string;
+                    convertedBillingId: string;
+                    procedureName: string;
+                    estimatedCost: number;
+                };
+                visit: {
+                    id: string;
+                    visitNumber: number;
+                    startedAt: string;
+                    status: string;
+                };
+                billing: {
+                    id: string;
+                    totalAmount: string;
+                    status: string;
+                    notes: string;
+                };
+            }>(`/treatment-plans/items/${itemId}/convert`, {
+                method: "POST",
+                body: JSON.stringify(payload),
+            }),
     },
 };
 
