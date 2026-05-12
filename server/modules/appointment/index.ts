@@ -1,5 +1,6 @@
 import { Router } from "express";
-import { requireAuth } from "../auth/index.js";
+import { requireAuth, requireRole } from "../auth/index.js";
+import { logAuditEvent } from "../../audit.js";
 import { demoAppointments, demoPatients } from "../../demo-store.js";
 import { v4 as uuidv4 } from "uuid";
 
@@ -211,8 +212,8 @@ router.get("/patient/:patientId", (req, res) => {
     res.json(results);
 });
 
-// Create appointment
-router.post("/", (req, res) => {
+// Create appointment (admin/doctor/reception)
+router.post("/", requireRole("admin", "doctor", "reception"), (req, res) => {
     const body = req.body || {};
     const appointmentDate = String(body.appointmentDate || "");
     const timeSlot = String(body.timeSlot || "");
@@ -257,11 +258,22 @@ router.post("/", (req, res) => {
         duration,
     };
     demoAppointments.push(appt);
+
+    logAuditEvent({
+        req,
+        action: "APPOINTMENT_CREATE",
+        entityType: "Appointment",
+        entityId: appt.id,
+        patientId,
+        summary: `Appointment created for patient ${patientId} on ${appointmentDate} at ${timeSlot}`,
+        metadata: { doctorId, appointmentDate, timeSlot, status },
+    });
+
     res.status(201).json(appt);
 });
 
-// Update appointment (preserves all existing fields not in body, like type/walk-in)
-router.put("/:id", (req, res) => {
+// Update appointment (admin/doctor/reception)
+router.put("/:id", requireRole("admin", "doctor", "reception"), (req, res) => {
     const idx = demoAppointments.findIndex((a) => a.id === req.params.id);
     if (idx === -1) return res.status(404).json({ message: "Appointment not found" });
 
@@ -293,6 +305,16 @@ router.put("/:id", (req, res) => {
     }
 
     demoAppointments[idx] = { ...merged, doctorId, patientId, appointmentDate, timeSlot, duration };
+
+    logAuditEvent({
+        req,
+        action: "APPOINTMENT_UPDATE",
+        entityType: "Appointment",
+        entityId: req.params.id as string,
+        patientId: String(patientId || ""),
+        summary: `Appointment ${req.params.id} updated (${appointmentDate} ${timeSlot})`,
+    });
+
     res.json(demoAppointments[idx]);
 });
 
@@ -320,11 +342,23 @@ router.patch("/:id/status", patchAppointment);
 // Generic patch route for future-safe clients
 router.patch("/:id", patchAppointment);
 
-// Delete appointment
-router.delete("/:id", (req, res) => {
-    const idx = demoAppointments.findIndex((a) => a.id === req.params.id);
+// Delete appointment (admin/doctor/reception)
+router.delete("/:id", requireRole("admin", "doctor", "reception"), (req, res) => {
+    const apptId = req.params.id as string;
+    const idx = demoAppointments.findIndex((a) => a.id === apptId);
     if (idx === -1) return res.status(404).json({ message: "Appointment not found" });
+    const deleted = demoAppointments[idx];
     demoAppointments.splice(idx, 1);
+
+    logAuditEvent({
+        req,
+        action: "APPOINTMENT_DELETE",
+        entityType: "Appointment",
+        entityId: apptId,
+        patientId: String(deleted?.patientId || ""),
+        summary: `Appointment ${apptId} deleted`,
+    });
+
     res.json({ success: true });
 });
 

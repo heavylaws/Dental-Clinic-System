@@ -1,5 +1,6 @@
 ﻿import { Router } from "express";
-import { requireAuth } from "../auth/index.js";
+import { requireAuth, requireRole } from "../auth/index.js";
+import { logAuditEvent } from "../../audit.js";
 import { v4 as uuidv4 } from "uuid";
 import { demoPatients, demoVisits, demoBillings } from "../../demo-store.js";
 
@@ -132,9 +133,9 @@ router.get("/patient/:patientId", (req, res) => {
     res.json(result);
 });
 
-// POST /api/treatment-plans/patient/:patientId - Create new plan
-router.post("/patient/:patientId", (req, res) => {
-    const { patientId } = req.params;
+// POST /api/treatment-plans/patient/:patientId - Create new plan (admin/doctor only)
+router.post("/patient/:patientId", requireRole("admin", "doctor"), (req, res) => {
+    const patientId = req.params.patientId as string;
     const { title, description } = req.body;
 
     // Validate patient exists
@@ -161,12 +162,21 @@ router.post("/patient/:patientId", (req, res) => {
 
     demoTreatmentPlans.push(plan);
 
+    logAuditEvent({
+        req,
+        action: "TREATMENT_PLAN_CREATE",
+        entityType: "TreatmentPlan",
+        entityId: plan.id,
+        patientId,
+        summary: `Treatment plan "${plan.title}" created for patient ${patientId}`,
+    });
+
     res.status(201).json(plan);
 });
 
-// PUT /api/treatment-plans/:planId - Update plan
-router.put("/:planId", (req, res) => {
-    const { planId } = req.params;
+// PUT /api/treatment-plans/:planId - Update plan (admin/doctor only)
+router.put("/:planId", requireRole("admin", "doctor"), (req, res) => {
+    const planId = req.params.planId as string;
     const { title, description, status } = req.body;
 
     const plan = demoTreatmentPlans.find((p) => p.id === planId);
@@ -196,12 +206,21 @@ router.put("/:planId", (req, res) => {
 
     plan.updatedAt = new Date().toISOString();
 
+    logAuditEvent({
+        req,
+        action: "TREATMENT_PLAN_UPDATE",
+        entityType: "TreatmentPlan",
+        entityId: planId,
+        patientId: plan.patientId,
+        summary: `Treatment plan "${plan.title}" updated (status: ${plan.status})`,
+    });
+
     res.json(plan);
 });
 
-// POST /api/treatment-plans/:planId/items - Add item to plan
-router.post("/:planId/items", (req, res) => {
-    const { planId } = req.params;
+// POST /api/treatment-plans/:planId/items - Add item to plan (admin/doctor only)
+router.post("/:planId/items", requireRole("admin", "doctor"), (req, res) => {
+    const planId = req.params.planId as string;
     const {
         tooth,
         area,
@@ -254,12 +273,22 @@ router.post("/:planId/items", (req, res) => {
 
     demoTreatmentPlanItems.push(item);
 
+    logAuditEvent({
+        req,
+        action: "TREATMENT_ITEM_CREATE",
+        entityType: "TreatmentPlanItem",
+        entityId: item.id,
+        patientId: plan.patientId,
+        summary: `Treatment item "${item.procedureName}" added to plan "${plan.title}"`,
+        metadata: { estimatedCost: item.estimatedCost, tooth: item.tooth },
+    });
+
     res.status(201).json(item);
 });
 
-// PUT /api/treatment-plans/items/:itemId - Update item
-router.put("/items/:itemId", (req, res) => {
-    const { itemId } = req.params;
+// PUT /api/treatment-plans/items/:itemId - Update item (admin/doctor only)
+router.put("/items/:itemId", requireRole("admin", "doctor"), (req, res) => {
+    const itemId = req.params.itemId as string;
     const {
         tooth,
         area,
@@ -318,12 +347,21 @@ router.put("/items/:itemId", (req, res) => {
 
     item.updatedAt = new Date().toISOString();
 
+    logAuditEvent({
+        req,
+        action: "TREATMENT_ITEM_UPDATE",
+        entityType: "TreatmentPlanItem",
+        entityId: itemId,
+        patientId: item.patientId,
+        summary: `Treatment item "${item.procedureName}" updated (status: ${item.status})`,
+    });
+
     res.json(item);
 });
 
-// DELETE /api/treatment-plans/items/:itemId - Delete item
-router.delete("/items/:itemId", (req, res) => {
-    const { itemId } = req.params;
+// DELETE /api/treatment-plans/items/:itemId - Delete item (admin/doctor only)
+router.delete("/items/:itemId", requireRole("admin", "doctor"), (req, res) => {
+    const itemId = req.params.itemId as string;
 
     const itemIndex = demoTreatmentPlanItems.findIndex((i) => i.id === itemId);
     if (itemIndex === -1) {
@@ -345,13 +383,23 @@ router.delete("/items/:itemId", (req, res) => {
 
     // Hard delete for draft/proposed items
     demoTreatmentPlanItems.splice(itemIndex, 1);
+
+    logAuditEvent({
+        req,
+        action: "TREATMENT_ITEM_DELETE",
+        entityType: "TreatmentPlanItem",
+        entityId: itemId,
+        patientId: item.patientId,
+        summary: `Treatment item "${item.procedureName}" deleted`,
+    });
+
     res.json({ success: true, message: "Item deleted" });
 });
 
-// POST /api/treatment-plans/items/:itemId/convert - Convert accepted item to visit/billing
+// POST /api/treatment-plans/items/:itemId/convert - Convert accepted item to visit/billing (admin/doctor only)
 // Phase 7C: Convert Accepted Treatment Plan Items to Visit/Billing
-router.post("/items/:itemId/convert", (req, res) => {
-    const { itemId } = req.params;
+router.post("/items/:itemId/convert", requireRole("admin", "doctor"), (req, res) => {
+    const itemId = req.params.itemId as string;
     const { visitDate, doctorId, notes } = req.body;
 
     // ─── Step 1: Find and validate item ────────────────────────────────
@@ -481,6 +529,16 @@ router.post("/items/:itemId/convert", (req, res) => {
         item.updatedAt = now;
 
         // ─── Step 9: Return success response ─────────────────────────────
+        logAuditEvent({
+            req,
+            action: "TREATMENT_ITEM_CONVERT",
+            entityType: "TreatmentPlanItem",
+            entityId: item.id,
+            patientId: item.patientId,
+            summary: `Treatment item "${item.procedureName}" converted to visit ${visitRecord.id} and billing ${billingRecord.id}`,
+            metadata: { visitId: visitRecord.id, billingId: billingRecord.id, estimatedCost: item.estimatedCost },
+        });
+
         res.json({
             success: true,
             message: "Treatment plan item converted successfully",

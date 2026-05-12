@@ -4,7 +4,8 @@
 // Settings and preferences live in settings.ts.
 
 import { Router } from "express";
-import { requireAuth } from "../auth/index.js";
+import { requireAuth, requireRole } from "../auth/index.js";
+import { logAuditEvent } from "../../audit.js";
 import { demoReminderLogs, sendAppointmentReminder } from "./core.js";
 import { getSchedulerState, runReminderSchedulerOnce } from "./scheduler.js";
 import {
@@ -65,8 +66,8 @@ router.get("/scheduler/status", (_req, res) => {
     res.json(getSchedulerState());
 });
 
-// POST /api/reminders/scheduler/run-once  (admin/test)
-router.post("/scheduler/run-once", async (_req, res) => {
+// POST /api/reminders/scheduler/run-once  (admin only)
+router.post("/scheduler/run-once", requireRole("admin"), async (_req, res) => {
     try {
         const summary = await runReminderSchedulerOnce();
         res.json({ success: true, summary });
@@ -82,18 +83,24 @@ router.get("/settings", (_req, res) => {
     res.json(getReminderSettings());
 });
 
-// PUT /api/reminders/settings
-router.put("/settings", (req, res) => {
+// PUT /api/reminders/settings  (admin only)
+router.put("/settings", requireRole("admin"), (req, res) => {
     try {
         const updated = setReminderSettings(req.body ?? {});
+        logAuditEvent({
+            req,
+            action: "UPDATE_REMINDER_SETTINGS",
+            entityType: "ReminderSettings",
+            summary: `Reminder settings updated by ${(req as any).user?.username}`,
+        });
         res.json(updated);
     } catch (e: any) {
         res.status(400).json({ error: e.message });
     }
 });
 
-// POST /api/reminders/settings/reset
-router.post("/settings/reset", (_req, res) => {
+// POST /api/reminders/settings/reset  (admin only)
+router.post("/settings/reset", requireRole("admin"), (_req, res) => {
     res.json(resetReminderSettings());
 });
 
@@ -106,12 +113,20 @@ router.get("/preferences/:patientId", (req, res) => {
     res.json(getPatientPreferences(patientId));
 });
 
-// PUT /api/reminders/preferences/:patientId
-router.put("/preferences/:patientId", (req, res) => {
-    const { patientId } = req.params;
+// PUT /api/reminders/preferences/:patientId (admin/doctor/reception)
+router.put("/preferences/:patientId", requireRole("admin", "doctor", "reception"), (req, res) => {
+    const patientId = req.params.patientId as string;
     if (!patientId) return res.status(400).json({ error: "patientId required" });
     try {
         const updated = setPatientPreferences(patientId, req.body ?? {});
+        logAuditEvent({
+            req,
+            action: "UPDATE_PATIENT_REMINDER_PREFS",
+            entityType: "ReminderPreferences",
+            entityId: patientId,
+            patientId,
+            summary: `Reminder preferences updated for patient ${patientId}`,
+        });
         res.json(updated);
     } catch (e: any) {
         res.status(400).json({ error: e.message });

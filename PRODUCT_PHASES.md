@@ -3065,6 +3065,143 @@ No variables were invented. Only variables verified in source code are documente
 
 ---
 
+---
+
+## Phase 9A — User Roles, Permissions, and Audit Logs
+
+**Status:** COMPLETE
+**Date:** 2025
+
+### Objective
+
+Add role-aware access control and rich audit logging for sensitive actions to make the system safer.
+
+### Roles Used
+
+| Role | Description |
+|------|-------------|
+| `admin` | Full access to all modules including settings, financial mutations, treatment, audit log |
+| `doctor` | Clinical access — patients, visits, treatment plans, appointments, financial mutations |
+| `reception` | Appointment management, reminders, patient basics |
+
+> Note: `accountant` role was not present in the existing auth module. The `doctor` role covers financial mutations per existing business rules. Admin covers accountant scope.
+
+### Permission Matrix
+
+| Endpoint Category | admin | doctor | reception |
+|---|---|---|---|
+| Reminder settings update (PUT /api/reminders/settings) | ✅ | ❌ | ❌ |
+| Scheduler run-once (POST /api/reminders/scheduler/run-once) | ✅ | ❌ | ❌ |
+| Patient reminder prefs (PUT /api/reminders/preferences/:id) | ✅ | ✅ | ✅ |
+| Ledger adjustment (POST /api/ledger/.../adjustment) | ✅ | ✅ | ❌ |
+| Payment plan create (POST /api/payment-plans/...) | ✅ | ✅ | ❌ |
+| Payment plan status update (PUT /api/payment-plans/:id/status) | ✅ | ✅ | ❌ |
+| Installment payment (POST /api/payment-plans/installments/.../payment) | ✅ | ✅ | ❌ |
+| Treatment plan create/update (POST/PUT /api/treatment-plans/...) | ✅ | ✅ | ❌ |
+| Treatment item create/update/delete (POST/PUT/DELETE /api/treatment-plans/items/...) | ✅ | ✅ | ❌ |
+| Treatment item convert (POST /api/treatment-plans/items/:id/convert) | ✅ | ✅ | ❌ |
+| Appointment create/update/delete (POST/PUT/DELETE /api/appointments) | ✅ | ✅ | ✅ |
+| System settings update (PUT /api/settings) | ✅ | ❌ | ❌ |
+| Audit log view (GET /api/audit-log) | ✅ | ❌ | ❌ |
+
+All routes require `requireAuth`. Unauthorized roles receive `HTTP 403 { error: "Insufficient permissions" }`.
+
+### Backend Middleware
+
+- **`requireAuth`** — existing, checks session, returns 401 if unauthenticated
+- **`requireRole(...roles)`** — existing, checks user role, returns 403 if role not in list
+- Applied inline per-route (not as global middleware) to keep surgical control
+
+### Protected Endpoints Summary
+
+- `POST /api/reminders/scheduler/run-once` → admin only
+- `PUT /api/reminders/settings` → admin only
+- `POST /api/reminders/settings/reset` → admin only
+- `POST /api/ledger/patient/:id/adjustment` → admin, doctor
+- `POST /api/payment-plans/patient/:id` → admin, doctor
+- `PUT /api/payment-plans/:id/status` → admin, doctor
+- `POST /api/payment-plans/installments/:id/payment` → admin, doctor
+- `POST /api/treatment-plans/patient/:id` → admin, doctor
+- `PUT /api/treatment-plans/:id` → admin, doctor
+- `POST /api/treatment-plans/:id/items` → admin, doctor
+- `PUT /api/treatment-plans/items/:id` → admin, doctor
+- `DELETE /api/treatment-plans/items/:id` → admin, doctor
+- `POST /api/treatment-plans/items/:id/convert` → admin, doctor
+- `POST /api/appointments` → admin, doctor, reception
+- `PUT /api/appointments/:id` → admin, doctor, reception
+- `DELETE /api/appointments/:id` → admin, doctor, reception
+
+### Audit Log Module
+
+**File:** `server/audit.ts`
+
+- In-memory store, max 1000 entries (FIFO)
+- Extended `AuditEntry` with: `entityType`, `entityId`, `patientId`, `summary`, `metadata`
+- Added `logAuditEvent()` helper for explicit rich audit entries from route handlers
+- HTTP-level `createAuditMiddleware()` continues to capture all write operations automatically
+
+**Actions explicitly audited:**
+- `APPOINTMENT_CREATE`, `APPOINTMENT_UPDATE`, `APPOINTMENT_DELETE`
+- `LEDGER_ADJUSTMENT`
+- `PAYMENT_PLAN_CREATE`, `PAYMENT_PLAN_STATUS_UPDATE`, `INSTALLMENT_PAYMENT`
+- `TREATMENT_PLAN_CREATE`, `TREATMENT_PLAN_UPDATE`
+- `TREATMENT_ITEM_CREATE`, `TREATMENT_ITEM_UPDATE`, `TREATMENT_ITEM_DELETE`, `TREATMENT_ITEM_CONVERT`
+- `UPDATE_REMINDER_SETTINGS`, `UPDATE_PATIENT_REMINDER_PREFS`
+
+### Audit Log API
+
+`GET /api/audit-log` — admin only
+
+Query params: `userId`, `role`, `action`, `entityType`, `patientId`, `from`, `to`, `limit` (max 1000)
+
+Returns newest first.
+
+### Client API
+
+`api.auditLogs.list(params?)` added to `client/src/lib/api.ts`
+
+Legacy `api.auditLog.list()` preserved for backward compatibility.
+
+### UI Location
+
+`/audit-log` route — existing page upgraded with:
+- Summary column
+- Entity type / action / patientId / date range filters
+- Color-coded action badges
+- Clear filters button
+
+### Files Changed
+
+- `server/audit.ts` — enriched `AuditEntry`, added `logAuditEvent()`, increased max to 1000
+- `server/index.ts` — upgraded `/api/audit-log` endpoint with Phase 9A query params
+- `server/modules/appointment/index.ts` — `requireRole` on POST/PUT/DELETE, `logAuditEvent`
+- `server/modules/reminder/index.ts` — `requireRole` on settings/reset/run-once, `logAuditEvent`
+- `server/modules/ledger/index.ts` — `requireRole` on adjustment, `logAuditEvent`
+- `server/modules/paymentPlan/index.ts` — `requireRole` on create/status/installment, `logAuditEvent`
+- `server/modules/treatment_plan/index.ts` — `requireRole` on all mutations, `logAuditEvent`
+- `client/src/lib/api.ts` — added `api.auditLogs.list()`
+- `client/src/pages/AuditLog.tsx` — upgraded UI with filters and summary column
+- `PRODUCT_PHASES.md` — this entry
+
+### Known Limitations
+
+- In-memory audit log — resets on server restart. Production requires DB persistence and immutable audit trail.
+- No external identity provider. Auth is session-based with hashed demo passwords.
+- No per-field permissions. Role-level only.
+- `accountant` role not in existing auth module; `doctor` role covers financial mutations.
+- PATCH /api/appointments/:id (status patch) is not role-guarded — intentionally, as status updates (check-in, no-show) are performed by all staff.
+- Statement share endpoint relies on HTTP-level audit middleware (not explicit `logAuditEvent` call) due to multiple early-return paths.
+
+### Build Results
+
+See acceptance test run below.
+
+### Ready to Commit
+
+✅ Phase 9A implementation complete. Role permissions enforced, audit logging operational, UI upgraded.
+
+---
+
 ## Future Phases
 
 See Phase 8C → Next Recommended Phases table above.

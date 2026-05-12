@@ -206,6 +206,32 @@ export const api = {
         },
     },
 
+    // ─── Audit Logs (Phase 9A) ─────────────────────────────────────────
+
+    auditLogs: {
+        list: (params?: {
+            userId?: string;
+            role?: string;
+            action?: string;
+            entityType?: string;
+            patientId?: string;
+            from?: string;
+            to?: string;
+            limit?: number;
+        }) => {
+            const qs = new URLSearchParams();
+            if (params?.userId) qs.set("userId", params.userId);
+            if (params?.role) qs.set("role", params.role);
+            if (params?.action) qs.set("action", params.action);
+            if (params?.entityType) qs.set("entityType", params.entityType);
+            if (params?.patientId) qs.set("patientId", params.patientId);
+            if (params?.from) qs.set("from", params.from);
+            if (params?.to) qs.set("to", params.to);
+            if (params?.limit) qs.set("limit", params.limit.toString());
+            return request<any[]>(`/audit-log?${qs}`);
+        },
+    },
+
     // ─── WhatsApp ─────────────────────────────────────────────────────
 
     whatsapp: {

@@ -11,16 +11,61 @@ export interface AuditEntry {
     action: string;
     resourceType: string;
     resourceId?: string;
+    // Phase 9A enrichment fields
+    entityType?: string;
+    entityId?: string;
+    patientId?: string;
+    summary?: string;
+    metadata?: Record<string, unknown>;
     status: number;
     ipAddress: string;
 }
 
-const MAX_ENTRIES = 500;
+const MAX_ENTRIES = 1000;
 export const auditLog: AuditEntry[] = [];
 
 let _counter = 0;
 function nextId() {
     return `al${++_counter}`;
+}
+
+// ─── Explicit rich audit helper (Phase 9A) ────────────────────────────────────
+// Called from within route handlers for sensitive mutations.
+
+export interface AuditEventParams {
+    req: any;
+    action: string;
+    entityType: string;
+    entityId?: string;
+    patientId?: string;
+    summary: string;
+    metadata?: Record<string, unknown>;
+}
+
+export function logAuditEvent(params: AuditEventParams): void {
+    if (!params.req?.user) return;
+    const user = params.req.user;
+    const entry: AuditEntry = {
+        id: nextId(),
+        timestamp: new Date().toISOString(),
+        userId: user.id,
+        username: user.username,
+        role: user.role,
+        method: params.req.method || "UNKNOWN",
+        path: params.req.path || "",
+        action: params.action,
+        resourceType: params.entityType,
+        resourceId: params.entityId,
+        entityType: params.entityType,
+        entityId: params.entityId,
+        patientId: params.patientId,
+        summary: params.summary,
+        metadata: params.metadata,
+        status: 200,
+        ipAddress: params.req.ip || params.req.connection?.remoteAddress || "unknown",
+    };
+    auditLog.unshift(entry);
+    if (auditLog.length > MAX_ENTRIES) auditLog.pop();
 }
 
 function classifyAction(method: string, path: string): { action: string; resourceType: string; resourceId?: string } {

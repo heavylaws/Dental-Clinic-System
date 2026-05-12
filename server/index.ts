@@ -172,14 +172,27 @@ app.get("/api/health", (_req, res) => {
     });
 });
 
-// ─── Audit Log endpoint (admin only) ────────────────────────────────
+// ─── Audit Log endpoint (admin only) — Phase 9A ─────────────────────
 
 app.get("/api/audit-log", (req: any, res) => {
     if (!req.user || req.user.role !== "admin") return res.status(403).json({ error: "Forbidden" });
-    const limit = parseInt(req.query.limit as string) || 100;
-    const resource = req.query.resource as string;
+
+    const limit = Math.min(parseInt(req.query.limit as string) || 100, 1000);
+    const { userId, role, action, entityType, patientId, from, to, resource } = req.query as Record<string, string>;
+
     let entries = auditLog;
+    if (userId) entries = entries.filter((e) => e.userId === userId);
+    if (role) entries = entries.filter((e) => e.role === role);
+    if (action) entries = entries.filter((e) => e.action === action);
+    if (entityType) entries = entries.filter((e) => (e.entityType || e.resourceType).toLowerCase() === entityType.toLowerCase());
+    if (patientId) entries = entries.filter((e) => e.patientId === patientId);
     if (resource) entries = entries.filter((e) => e.resourceType.toLowerCase() === resource.toLowerCase());
+    if (from) entries = entries.filter((e) => e.timestamp >= from);
+    if (to) {
+        const toEnd = to.length === 10 ? to + "T23:59:59.999Z" : to;
+        entries = entries.filter((e) => e.timestamp <= toEnd);
+    }
+
     res.json(entries.slice(0, limit));
 });
 

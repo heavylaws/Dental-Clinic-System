@@ -1,5 +1,6 @@
 import { Router } from "express";
-import { requireAuth } from "../auth/index.js";
+import { requireAuth, requireRole } from "../auth/index.js";
+import { logAuditEvent } from "../../audit.js";
 import { demoPatients } from "../../demo-store.js";
 import { createLedgerCreditEntry } from "../ledger/index.js";
 import { v4 as uuidv4 } from "uuid";
@@ -203,9 +204,9 @@ router.get("/patient/:patientId", (req, res) => {
     });
 });
 
-// POST /api/payment-plans/patient/:patientId - Create payment plan
-router.post("/patient/:patientId", (req, res) => {
-    const { patientId } = req.params;
+// POST /api/payment-plans/patient/:patientId - Create payment plan (admin/doctor only)
+router.post("/patient/:patientId", requireRole("admin", "doctor"), (req, res) => {
+    const patientId = req.params.patientId as string;
     const {
         title,
         description,
@@ -309,6 +310,16 @@ router.post("/patient/:patientId", (req, res) => {
     // Return with summary
     const summary = getPlanSummary(plan, installments);
 
+    logAuditEvent({
+        req,
+        action: "PAYMENT_PLAN_CREATE",
+        entityType: "PaymentPlan",
+        entityId: plan.id,
+        patientId,
+        summary: `Payment plan "${plan.title}" created for patient ${patientId} — $${plan.totalAmount} over ${plan.installmentCount} installments`,
+        metadata: { totalAmount: plan.totalAmount, installmentCount: plan.installmentCount, frequency: plan.frequency },
+    });
+
     res.status(201).json({
         success: true,
         plan,
@@ -318,9 +329,9 @@ router.post("/patient/:patientId", (req, res) => {
     });
 });
 
-// PUT /api/payment-plans/:planId/status - Update plan status
-router.put("/:planId/status", (req, res) => {
-    const { planId } = req.params;
+// PUT /api/payment-plans/:planId/status - Update plan status (admin/doctor only)
+router.put("/:planId/status", requireRole("admin", "doctor"), (req, res) => {
+    const planId = req.params.planId as string;
     const { status } = req.body;
 
     const validStatuses = ["active", "completed", "cancelled"];
@@ -350,6 +361,16 @@ router.put("/:planId/status", (req, res) => {
     const installments = demoInstallments.filter((i) => i.planId === planId);
     const summary = getPlanSummary(plan, installments);
 
+    logAuditEvent({
+        req,
+        action: "PAYMENT_PLAN_STATUS_UPDATE",
+        entityType: "PaymentPlan",
+        entityId: planId,
+        patientId: plan.patientId,
+        summary: `Payment plan "${plan.title}" status changed to ${status}`,
+        metadata: { status },
+    });
+
     res.json({
         success: true,
         plan,
@@ -358,9 +379,9 @@ router.put("/:planId/status", (req, res) => {
     });
 });
 
-// POST /api/payment-plans/installments/:installmentId/payment - Pay installment
-router.post("/installments/:installmentId/payment", (req, res) => {
-    const { installmentId } = req.params;
+// POST /api/payment-plans/installments/:installmentId/payment - Pay installment (admin/doctor only)
+router.post("/installments/:installmentId/payment", requireRole("admin", "doctor"), (req, res) => {
+    const installmentId = req.params.installmentId as string;
     const { amount, note } = req.body;
 
     // Validate amount
@@ -437,6 +458,16 @@ router.post("/installments/:installmentId/payment", (req, res) => {
     }
 
     demoInstallmentPayments.push(paymentRecord);
+
+    logAuditEvent({
+        req,
+        action: "INSTALLMENT_PAYMENT",
+        entityType: "PaymentInstallment",
+        entityId: installmentId,
+        patientId: plan.patientId,
+        summary: `Installment #${installment.installmentNumber} payment of $${numAmount} for plan "${plan.title}"`,
+        metadata: { amount: numAmount, planId: plan.id, installmentNumber: installment.installmentNumber },
+    });
 
     const installments = demoInstallments.filter((i) => i.planId === plan.id);
     const summary = getPlanSummary(plan, installments);
