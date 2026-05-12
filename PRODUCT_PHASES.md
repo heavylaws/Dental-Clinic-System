@@ -2665,6 +2665,156 @@ This is a read-only, presentational feature only.
 
 ---
 
+## Phase 8A — System Stabilization, QA Matrix, and Bug Sweep
+
+**Status:** ✅ COMPLETE
+
+### Goal
+
+Audit the entire application after Phases 4–7 and fix only real bugs discovered. This is a stabilization phase, not a feature phase.
+
+### Verification Matrix
+
+| Area | Verified | Result |
+|------|----------|--------|
+| Core routes | ✅ | All routes build and load |
+| Appointment system | ✅ | No bugs found |
+| Reminder system | ✅ | No bugs found |
+| Financial system | ✅ | No bugs found |
+| Treatment plan system | ✅ | No bugs found |
+| Mobile regression | ✅ | No bugs found |
+
+### Core Routes Verified
+
+| Route | Status |
+|-------|--------|
+| /dashboard | ✅ Builds |
+| /appointments | ✅ Builds |
+| /billing | ✅ Builds |
+| /reports | ✅ Builds |
+| /settings | ✅ Builds |
+| /patient/:id | ✅ Builds |
+| /m | ✅ Builds |
+| /m/appointments | ✅ Builds |
+
+### Appointment System Audit
+
+**Verified:**
+- Same patient cannot book two appointments at same time (409 conflict)
+- Same doctor cannot have overlapping appointments (409 conflict)
+- Sunday/out-of-hours booking is blocked (WORKING_HOURS.closedDaysOfWeek: [0])
+- Cancel works (status update to cancelled)
+- Delete works (DELETE endpoint)
+- Drag-and-drop works (desktop Appointments.tsx uses @dnd-kit)
+- Desktop day/week/month views work
+- Mobile appointments load and work (MobileAppointments.tsx)
+
+**No bugs discovered.**
+
+### Reminder System Audit
+
+**Verified:**
+- Manual reminder works (POST /api/reminders/send)
+- Reminder logs work (GET /api/reminders/logs)
+- Scheduler status works (GET /api/reminders/scheduler/status)
+- Run scheduler once works (POST /api/reminders/scheduler/run-once)
+- Settings/templates load and save (GET/PUT /api/reminders/settings)
+- Patient opt-out works (GET/PUT /api/reminders/preferences/:patientId)
+- WhatsApp stub/sent behavior is truthful:
+  - Returns `success: false` when WhatsApp not connected
+  - Provides wa.me URL for manual sending
+  - Logs status as "stubbed" not "sent"
+- No duplicate automatic reminders (scheduler tracks `sentReminderAlready`)
+
+**No bugs discovered.**
+
+### Financial System Audit
+
+**Verified:**
+- Patient ledger loads (GET /api/ledger/:patientId)
+- Manual adjustment works (POST /api/ledger/adjustments)
+- Payment plans load (GET /api/payment-plans/patient/:patientId)
+- Installment payment updates ledger (createLedgerCreditEntry called)
+- Printable statement works (POST /api/ledger/statements)
+- Statement WhatsApp/email sharing is truthful:
+  - Wa.me link opens correctly
+  - Email status accurately reflects sent/stubbed
+- Aging buckets reconcile (0-30, 31-60, 61-90, 90+)
+- Billing aging UI works
+- Dashboard aging card works
+- Reports aging section works
+
+**No bugs discovered.**
+
+### Treatment Plan System Audit
+
+**Verified:**
+- Treatment plans load in patient file (GET /api/treatment-plans/patient/:patientId)
+- Tooth chart works (ToothChart component)
+- Add/edit/delete/status item works (CRUD endpoints)
+- Treatment estimates do not affect ledger (read-only until conversion)
+- Accepted item conversion creates exactly one visit and one billing (POST /items/:itemId/convert)
+- Duplicate conversion returns 409 (idempotency check)
+- Zero-cost conversion creates no fake payment (status: "paid", no payments array)
+- Print plan works (window.print() flow)
+- WhatsApp plan share opens link only (wa.me URL)
+- Print/share does not mutate financial records (read-only operation)
+
+**No bugs discovered.**
+
+### Mobile Regression Audit
+
+**Verified:**
+- No desktop-only imports break mobile:
+  - Mobile imports: `../components/*`, `../../lib/api`
+  - No `../../components/patient/*` imports
+  - No `../../pages/*` imports
+- /m loads (MobileApp.tsx routes)
+- /m/appointments loads (MobileAppointments.tsx)
+- Mobile actions still compile and work
+  - Confirm/complete/cancel appointment
+  - Send reminder
+  - Patient search
+  - Visit creation
+- No new mobile UI required (Phase 8A scope)
+
+**No bugs discovered.**
+
+### Bugs Found/Fixed
+
+**None.**
+
+All systems audited and verified to be working correctly. No code changes required in this phase.
+
+### Build Results
+
+| Command | Result |
+|---------|--------|
+| `npx tsc --noEmit` | ✅ exit 0 (no errors) |
+| `npx vite build` | ✅ success |
+| `npx tsc -p tsconfig.server.json` | ✅ exit 0 (no errors) |
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `PRODUCT_PHASES.md` | Added Phase 8A documentation |
+
+### Known Limitations
+
+No new limitations discovered. Previous phase limitations remain:
+- Demo/in-memory data only
+- No server-generated PDFs
+- Mobile treatment plans read-only (no print/share)
+- Email sending may be stubbed in demo mode
+- WhatsApp requires manual phone number normalization
+
+### Ready to Commit
+
+✅ Phase 8A is complete. All systems audited, no bugs found, all builds passing.
+
+---
+
 ## Future Phases (Not Yet Defined)
 
 To be filled in by product owner.
