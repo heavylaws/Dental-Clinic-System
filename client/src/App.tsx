@@ -3,6 +3,7 @@ import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import MobileApp from "./mobile/MobileApp";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "./lib/api";
+import { canViewAuditLogs } from "./lib/permissions";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import PatientFile from "./pages/PatientFile";
@@ -96,7 +97,7 @@ function DesktopApp() {
                 <Route path="/billing" element={<Billing />} />
                 <Route path="/appointments" element={<Appointments />} />
                 <Route path="/recalls" element={<Recalls />} />
-                <Route path="/audit-log" element={<AuditLog />} />
+                <Route path="/audit-log" element={canViewAuditLogs(user) ? <AuditLog /> : <Navigate to="/" replace />} />
                 <Route path="/whatsapp" element={<WhatsApp />} />
                 <Route path="/users" element={<Users />} />
                 <Route path="/settings" element={<Settings />} />
