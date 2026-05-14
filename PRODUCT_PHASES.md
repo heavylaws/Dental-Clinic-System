@@ -3202,6 +3202,97 @@ See acceptance test run below.
 
 ---
 
+## Phase 9B1 — Current User + Frontend Permission Helpers
+
+**Status:** ✅ COMPLETE
+
+### Goal
+
+Create a lightweight typed permission helper layer on the frontend that mirrors the backend `requireRole()` guards from Phase 9A. **No UI gating applied yet** — this phase only builds the helper infrastructure so Phase 9B2 can apply it to pages and buttons.
+
+### Current-User Discovery
+
+| Item | Result |
+|------|--------|
+| Backend endpoint | `GET /api/auth/me` — returns `{ id, username, displayName, role, isActive }` (password excluded) |
+| Frontend API helper | `api.auth.me()` already exists at `client/src/lib/api.ts` line 46 |
+| App.tsx usage | `useQuery({ queryKey: ["auth", "me"], queryFn: api.auth.me })` in `DesktopApp` (line 70) |
+| User object shape | `{ id: string, username: string, displayName: string, role: "admin" \| "doctor" \| "reception", isActive: boolean }` |
+| Auth mechanism | Passport.js session-based, cookies with `credentials: "include"` |
+| Conclusion | **No new API helper needed** — `api.auth.me()` already works correctly |
+
+### Permission Helper File
+
+**New file:** `client/src/lib/permissions.ts`
+
+#### Types
+
+```ts
+type UserRole = "admin" | "doctor" | "reception";
+
+interface PermissionUser {
+  id: string;
+  role: UserRole;
+  [key: string]: unknown;
+}
+```
+
+#### Helper Functions
+
+| Function | Allowed Roles | Backend Guard Reference |
+|----------|---------------|------------------------|
+| `hasRole(user, roles)` | Core helper — checks if user holds any of the specified roles | N/A (generic utility) |
+| `canViewAuditLogs(user)` | `admin` | `server/index.ts:178` — inline role check |
+| `canManageReminderSettings(user)` | `admin` | `requireRole("admin")` on PUT/POST reminder settings |
+| `canManageAppointments(user)` | `admin`, `doctor`, `reception` | `requireRole("admin", "doctor", "reception")` on POST/PUT/DELETE appointments |
+| `canManageFinancials(user)` | `admin`, `doctor` | `requireRole("admin", "doctor")` on ledger adjustments, payment plans |
+| `canManageTreatmentPlans(user)` | `admin`, `doctor` | `requireRole("admin", "doctor")` on treatment plan mutations |
+| `canConvertTreatmentItems(user)` | `admin`, `doctor` | `requireRole("admin", "doctor")` on POST /treatment-plans/items/:id/convert |
+| `canManageUsers(user)` | `admin` | `requireRole("admin")` on all /users routes |
+| `canManageSettings(user)` | `admin` | `requireRole("admin")` on settings mutations |
+| `canManageReminderPreferences(user)` | `admin`, `doctor`, `reception` | `requireRole("admin", "doctor", "reception")` on PUT /reminders/preferences/:patientId |
+
+### Role Mapping Summary
+
+| Capability | admin | doctor | reception |
+|------------|:-----:|:------:|:---------:|
+| View audit logs | ✅ | ❌ | ❌ |
+| Manage reminder settings | ✅ | ❌ | ❌ |
+| Manage users | ✅ | ❌ | ❌ |
+| Manage clinic settings | ✅ | ❌ | ❌ |
+| Manage appointments | ✅ | ✅ | ✅ |
+| Manage reminder preferences | ✅ | ✅ | ✅ |
+| Manage financials | ✅ | ✅ | ❌ |
+| Manage treatment plans | ✅ | ✅ | ❌ |
+| Convert treatment items | ✅ | ✅ | ❌ |
+
+### What This Phase Does NOT Do
+
+- ❌ No pages gated by role (Phase 9B2)
+- ❌ No buttons hidden by role (Phase 9B2)
+- ❌ No UI redesign
+- ❌ No backend changes
+- ❌ No new backend endpoints
+- ❌ No mobile changes
+- ❌ No package.json/package-lock.json changes
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `client/src/lib/permissions.ts` | **New** — typed permission helpers mirroring backend `requireRole()` guards |
+| `PRODUCT_PHASES.md` | This entry |
+
+### Backend Remains Source of Truth
+
+The frontend permission helpers are **advisory UI convenience checks only**. The backend `requireRole()` middleware remains the authoritative enforcement layer. Even if a frontend check is bypassed (e.g., via browser dev tools), the backend will reject unauthorized requests with HTTP 403.
+
+### Build Results
+
+See build verification below.
+
+---
+
 ## Future Phases
 
 See Phase 8C → Next Recommended Phases table above.
