@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
+import { canManageSettings, canManageReminderSettings } from "../lib/permissions";
 
 const SETTING_FIELDS = [
     { key: "clinic_name", label: "Clinic Name", type: "text", placeholder: "DentalClinic" },
@@ -36,6 +37,10 @@ export default function Settings() {
 
     const { data: user } = useQuery({ queryKey: ["auth", "me"], queryFn: api.auth.me });
 
+    // ─── Permission helpers ───────────────────────────────────────────
+    const canManageGeneralSettings = canManageSettings(user);
+    const canManageReminders = canManageReminderSettings(user);
+
     // Database restore state
     const [backupFile, setBackupFile] = useState<File | null>(null);
     const [restoreStatus, setRestoreStatus] = useState<"idle" | "restoring" | "success" | "error">("idle");
@@ -49,7 +54,7 @@ export default function Settings() {
     const { data: serverInfo } = useQuery({
         queryKey: ["settings", "server-info"],
         queryFn: () => api.settings.serverInfo(),
-        enabled: user?.role === "admin",
+        enabled: canManageSettings(user),
     });
 
     useEffect(() => {
@@ -131,7 +136,7 @@ export default function Settings() {
             <h1 className="text-3xl font-extrabold text-gray-900 mb-8">⚙️ Settings</h1>
 
             {/* ─── Server Network Info ─── */}
-            {user?.role === "admin" && serverInfo && (
+            {canManageGeneralSettings && serverInfo && (
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 mb-8">
                     <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
                         🌐 Server Network Info
@@ -207,7 +212,7 @@ export default function Settings() {
             )}
 
             {/* ─── Clinic Settings ─── */}
-            {user?.role === "admin" && (
+            {canManageGeneralSettings && (
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6 mb-8">
                     <h2 className="text-xl font-bold text-gray-800 mb-6">🏥 Clinic Configuration</h2>
                     {isLoading ? (
@@ -246,7 +251,7 @@ export default function Settings() {
             )}
 
             {/* ─── Reminder Settings (Phase 5C) ─── */}
-            {user?.role === "admin" && <ReminderSettingsPanel />}
+            {canManageReminders && <ReminderSettingsPanel />}
 
             {/* ─── Change Password ─── */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
@@ -300,7 +305,7 @@ export default function Settings() {
             </div>
 
             {/* ─── Database Management ─── */}
-            {user?.role === "admin" && (
+            {canManageGeneralSettings && (
                 <div className="bg-white rounded-2xl shadow-sm border border-red-200 p-6 mt-8">
                     <h2 className="text-xl font-bold text-red-700 mb-2">⚠️ Database Management</h2>
                     <p className="text-sm text-gray-600 mb-6">Upload a legacy SQL Server `.bak` file to restore the database. This action is destructive and will overwrite existing data.</p>
@@ -339,7 +344,7 @@ export default function Settings() {
             )}
 
             {/* ─── Data Backup (Demo Mode) ─── */}
-            {user?.role === "admin" && (
+            {canManageGeneralSettings && (
                 <div className="bg-white rounded-2xl shadow-sm border border-blue-200 p-6 mt-8">
                     <h2 className="text-xl font-bold text-blue-700 mb-1">💾 Data Backup</h2>
                     <p className="text-sm text-gray-500 mb-4">
