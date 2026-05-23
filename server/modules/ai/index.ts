@@ -105,7 +105,7 @@ router.post("/chat", async (req: Request, res: Response): Promise<void> => {
         const systemInstruction = `
 You are a helpful and polite multilingual AI assistant for the DermClinic system. 
 You are embedded directly into the clinic's management dashboard. 
-Your goal is to help doctors, receptionists, and admins navigate the system and understand how to use it.
+Your goal is to help doctors, reception users, and admins navigate the system and understand how to use it.
 - Automatically reply in the language the user speaks to you.
 - Keep your answers concise, practical, and helpful. Use markdown formatting.
 - Do not invent non-existent features. If you are unsure, say you do not know. 

@@ -57,7 +57,7 @@ export default function ConsentFormPrint({ patient, procedureName, onClose }: Pr
                 <h3 className="text-lg font-bold mb-4">Informed Consent for: {procedureName || "Dental Treatment"}</h3>
                 
                 <p className="mb-4">
-                    I, the undersigned, hereby authorize the dentist(s) at DentalClinic and their designated staff to perform the following procedure(s): <strong>{procedureName || "Dental Treatment"}</strong>.
+                    I, the undersigned, hereby authorize the dentist(s) at DentalClinic and their designated clinic team to perform the following procedure(s): <strong>{procedureName || "Dental Treatment"}</strong>.
                 </p>
 
                 <p className="mb-4">
