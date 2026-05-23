@@ -41,7 +41,7 @@ export default function MobileSettings({ user }: { user: any }) {
             <div>
               <p style={{ fontWeight: 700, fontSize: "1rem", color: "#f1f5f9", margin: 0 }}>{user.fullName || user.username}</p>
               <p style={{ fontSize: "0.78rem", color: "#64748b", margin: 0 }}>
-                {user.role === "admin" ? "👑 Administrator" : user.role === "doctor" ? "🩺 Doctor" : "👩‍💼 Staff"}
+                {user.role === "admin" ? "👑 Administrator" : user.role === "doctor" ? "🩺 Doctor" : "👩‍💼 Reception"}
               </p>
             </div>
           </div>
@@ -257,7 +257,7 @@ function UserForm({ title, user, onSubmit, isPending, onCancel }: {
   const [form, setForm] = useState({
     username: user?.username || "",
     fullName: user?.fullName || "",
-    role: user?.role || "staff",
+    role: user?.role || "reception",
     password: "",
     active: user?.active !== undefined ? user.active : true,
   });
@@ -276,7 +276,7 @@ function UserForm({ title, user, onSubmit, isPending, onCancel }: {
         <select value={form.role} onChange={e => set("role", e.target.value)} className="mobile-input">
           <option value="admin">Admin</option>
           <option value="doctor">Doctor</option>
-          <option value="staff">Staff</option>
+          <option value="reception">Reception</option>
         </select>
         {user && (
           <label style={{ display: "flex", alignItems: "center", gap: "8px", color: "#94a3b8", fontSize: "0.88rem" }}>
