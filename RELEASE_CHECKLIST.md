@@ -1,6 +1,6 @@
 # Dental Clinic System — Release Checklist
 
-> **Phase 8C** · Last updated: May 2026  
+> **Phase 9B3** · Last updated: May 2026  
 > Run this checklist before tagging any release or handing off to a new team.
 
 ---
@@ -43,9 +43,9 @@ Start the server (`npm run dev`) and verify each route loads without errors.
 | `/billing` | Invoice list loads; payment plans tab accessible; statements tab accessible |
 | `/reports` | Financial summary renders; receivables aging table renders |
 | `/recalls` | Recall list renders |
-| `/settings` | Clinic settings load; reminder templates section loads |
+| `/settings` | Clinic settings load (admin-only sections hidden for non-admins); Change Password section available to all authenticated users |
 | `/users` | User list renders (admin only) |
-| `/audit-log` | Audit log renders (admin only) |
+| `/audit-log` | Audit trail renders — access gated by `canViewAuditLogs`; non-admin users are redirected |
 | `/whatsapp` | WhatsApp status page loads |
 
 ### Mobile Routes
@@ -179,11 +179,29 @@ node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
 
 ---
 
-## F. Next Recommended Phases
+## F. Role Model Quick Reference
+
+The system enforces exactly three backend roles. The backend `requireRole()` middleware is the authoritative enforcement layer. Frontend helpers in `client/src/lib/permissions.ts` are advisory UI checks only.
+
+| Role | Access |
+|------|--------|
+| `admin` | Full system — all modules, settings, user management, audit log |
+| `doctor` | Clinical — patients, visits, treatment plans, financials, appointments |
+| `reception` | Appointments, patient basics, billing view, reminders |
+
+Only the three roles above are valid. Any other role string is non-canonical and must not be used in source code, configuration, or documentation.
+
+---
+
+## G. Next Recommended Phases
 
 | Phase | Description |
 |-------|-------------|
-| Phase 9 | PostgreSQL-first persistence — migrate all in-memory stores to DB-backed repositories |
+| Phase 9A | ✅ COMPLETE — role-aware access control and rich audit logging |
+| Phase 9B1 | ✅ COMPLETE — frontend permission helper infrastructure (`client/src/lib/permissions.ts`) |
+| Phase 9B2 | ✅ COMPLETE — audit log route gating, settings UI permission gating, mobile role UI alignment, role terminology cleanup |
+| Phase 9B3 | ✅ COMPLETE — documentation sync for Phase 9B2 |
+| Phase 9C | Role-Based Runtime QA Matrix — test admin/doctor/reception behavior across desktop and mobile; discovery/audit only first, no implementation unless a bug is found |
 | Phase 10 | Real email/SMS integration — configure Nodemailer or SendGrid; integrate SMS provider |
 | Phase 11 | Server-side PDF generation — use Puppeteer or pdfkit for statements, receipts, treatment plans |
 | Phase 12 | Production hardening — remove demo credentials, add proper user management, audit trail to DB |

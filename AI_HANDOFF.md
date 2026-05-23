@@ -1,6 +1,6 @@
 # DermClinic System — AI Handoff Document
 
-> **Last updated**: 2026-05-05  
+> **Last updated**: 2026-05-23  
 > **Codebase**: ~114 source files, ~17,500 lines of TypeScript/TSX/CSS  
 > **Repository**: `heavylaws/ClinicSystem` (branch: `main`)
 
@@ -171,10 +171,20 @@ clinicsystem/
 - **Method**: Session-based (express-session + Passport.js local strategy)
 - **Password hashing**: bcrypt
 - **Session duration**: 8 hours
-- **Roles**: `admin`, `doctor`, `reception`
-  - Admin: Full access (user management, settings, reports)
-  - Doctor: Clinical features (visits, diagnoses, prescriptions, labs)
-  - Reception: Patient registration, queue management, billing
+- **Roles**: `admin`, `doctor`, `reception` (these are the only valid backend roles)
+  - Admin: Full access (user management, settings, reports, audit log)
+  - Doctor: Clinical features (visits, diagnoses, prescriptions, labs, treatment plans, financials)
+  - Reception: Patient registration, queue management, billing view, appointments, reminders
+- **Backend is the source of truth**: All role enforcement is via `requireRole()` middleware. Frontend checks in `client/src/lib/permissions.ts` are advisory UI-only.
+- **Frontend permission helpers** (`client/src/lib/permissions.ts`):
+  - `canViewAuditLogs` — admin only
+  - `canManageSettings` — admin only
+  - `canManageReminderSettings` — admin only
+  - `canManageAppointments` — admin, doctor, reception
+  - `canManageReminderPreferences` — admin, doctor, reception
+  - `canManageFinancials` — admin, doctor
+  - `canManageTreatmentPlans` — admin, doctor
+  - `canConvertTreatmentItems` — admin, doctor
 - **Bootstrap**: If no users exist, `POST /api/auth/bootstrap` creates a default admin
 
 ---
@@ -325,6 +335,10 @@ Then access via `https://<server-ip>:3443`.
 | `f0c270c` | Windows 11 migration AI handoff guide |
 | `7e518aa` | Gitignore log files, remote access docs, Windows install script |
 | `db553be` | **Dedicated mobile application** — full responsive mobile UI with navigation, gestures, device-aware login |
+| `cf79507` | feat: gate audit log route by role permission (`canViewAuditLogs`) |
+| `848b7bd` | feat: use permission helpers for settings UI gating |
+| `c45f627` | fix: align mobile role UI with backend roles (admin, doctor, reception) |
+| `6de5ec7` | chore: align role terminology with backend roles |
 
 ---
 

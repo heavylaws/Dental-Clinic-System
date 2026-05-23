@@ -3189,7 +3189,7 @@ Legacy `api.auditLog.list()` preserved for backward compatibility.
 - No external identity provider. Auth is session-based with hashed demo passwords.
 - No per-field permissions. Role-level only.
 - `accountant` role not in existing auth module; `doctor` role covers financial mutations.
-- PATCH /api/appointments/:id (status patch) is not role-guarded — intentionally, as status updates (check-in, no-show) are performed by all staff.
+- PATCH /api/appointments/:id (status patch) is not role-guarded — intentionally, as status updates (check-in, no-show) are performed by all authenticated users.
 - Statement share endpoint relies on HTTP-level audit middleware (not explicit `logAuditEvent` call) due to multiple early-return paths.
 
 ### Build Results
@@ -3293,6 +3293,161 @@ See build verification below.
 
 ---
 
+---
+
+## Phase 9B2 — Role Gating, Settings Permission Helpers, Mobile Role Alignment
+
+**Status:** ✅ COMPLETE
+**Date:** 2026-05-21
+
+### Objective
+
+Apply Phase 9B1 permission helpers to actual UI gating points and clean up any invalid role terminology in first-party source code.
+
+### Commits
+
+| Hash | Message |
+|------|---------|
+| `cf79507` | feat: gate audit log route by role permission (`canViewAuditLogs`) |
+| `848b7bd` | feat: use permission helpers for settings UI gating |
+| `c45f627` | fix: align mobile role UI with backend roles (admin, doctor, reception) |
+| `6de5ec7` | chore: align role terminology with backend roles |
+
+### Role Model (Authoritative)
+
+The only valid backend roles are:
+
+| Role | Description |
+|------|-------------|
+| `admin` | Full access — all modules, settings, user management, audit log |
+| `doctor` | Clinical access — patients, visits, treatment plans, financials, appointments |
+| `reception` | Appointment management, patient basics, billing view, reminders |
+
+**Any role string other than the three above is non-canonical and must not appear in source code, configuration, or documentation as a role value.** The backend `requireRole()` middleware is the authoritative enforcement layer.
+
+### Changes Applied
+
+#### Audit Log Route Gating (`cf79507`)
+
+- `/audit-log` direct route in the desktop app is now gated with `canViewAuditLogs(user)`.
+- Users without the admin role are redirected away from the route.
+- The backend `GET /api/audit-log` already required admin (`requireRole("admin")`); this adds the matching frontend guard.
+
+#### Settings UI Permission Gating (`848b7bd`)
+
+- `client/src/pages/Settings.tsx` now uses `canManageSettings(user)` and `canManageReminderSettings(user)` permission helpers instead of raw `user?.role === "admin"` checks.
+- Admin-only sections (Clinic Configuration, Reminder Settings, Database Management, Data Backup, Server Network Info) are hidden for non-admin users.
+- `/settings` route remains accessible to all authenticated users for the Change Password section.
+- No backend endpoints were changed.
+
+#### Mobile Role UI Alignment (`c45f627`)
+
+- `client/src/mobile/pages/MobileSettings.tsx`: non-canonical role label removed from role display, user creation form default corrected to `"reception"`, role dropdown aligned to backend roles.
+- `client/src/mobile/components/BottomTabBar.tsx`: non-canonical role entry removed from all role arrays; only `["admin", "doctor", "reception"]` used.
+- No layout or mobile behavior changes.
+
+#### Role Terminology Cleanup (`6de5ec7`)
+
+- `client/src/components/ConsentFormPrint.tsx`: patient-facing consent text updated to use neutral clinic team wording.
+- `server/modules/ai/index.ts`: AI system prompt updated to use `"reception users"` in place of legacy role wording.
+- No role logic, endpoints, or business rules changed.
+
+### Permission Helper File
+
+**File:** `client/src/lib/permissions.ts`
+
+| Helper | Allowed Roles |
+|--------|---------------|
+| `canViewAuditLogs` | `admin` |
+| `canManageSettings` | `admin` |
+| `canManageReminderSettings` | `admin` |
+| `canManageAppointments` | `admin`, `doctor`, `reception` |
+| `canManageReminderPreferences` | `admin`, `doctor`, `reception` |
+| `canManageFinancials` | `admin`, `doctor` |
+| `canManageTreatmentPlans` | `admin`, `doctor` |
+| `canConvertTreatmentItems` | `admin`, `doctor` |
+
+### What Was NOT Changed
+
+- No financial logic
+- No reminder scheduler logic
+- No appointment conflict logic
+- No treatment conversion logic
+- No mobile layout or mobile behavior redesign
+- No backend endpoints, schemas, or business rules
+- No package files
+
+### Build Results
+
+| Command | Result |
+|---------|--------|
+| `npx tsc --noEmit` | ✅ exit 0 |
+| `npx vite build` | ✅ success |
+| `npx tsc -p tsconfig.server.json --noEmit` | ✅ exit 0 |
+
+---
+
+## Phase 9B3 — Documentation Sync
+
+**Status:** ✅ COMPLETE
+**Date:** 2026-05-23
+**Type:** Documentation-only. No source code, backend, mobile behavior, or package files changed.
+
+### Objective
+
+Synchronize all project documentation after Phase 9B2. Ensure the role model, permission helpers, and completed phase history are accurately reflected across all doc files.
+
+### Files Updated
+
+| File | Areas Updated |
+|------|---------------|
+| `README.md` | Overview prose (valid role language), route table (`/audit-log`, `/settings`, `/users`), new Role Model section |
+| `AI_HANDOFF.md` | Last-updated date, Authentication & Authorization section (role list, permission helpers, backend source-of-truth note), Git History table (Phase 9B2 commits) |
+| `RELEASE_CHECKLIST.md` | Phase header updated to 9B3, `/settings` and `/audit-log` route descriptions, new Role Model Quick Reference section (section F), Next Recommended Phases expanded to include 9A through 9C |
+| `PRODUCT_PHASES.md` | Phase 9A Known Limitations fix, Phase 9B2 entry (this file), Phase 9B3 entry (this file), Future Phases section updated |
+
+### Documentation Content Added
+
+1. Phase 9B2 marked complete with commit hashes, behavior descriptions, and build results.
+2. Current role model (`admin`, `doctor`, `reception`) documented with authoritative statement that backend is the source of truth.
+3. Frontend permission helpers documented with their allowed roles.
+4. Non-canonical role terminology removed from documentation; canonical role model (`admin`, `doctor`, `reception`) documented consistently.
+5. Phase 9B3 (this phase) added as a documentation-sync phase.
+6. Phase 9C added as next recommended phase (Role-Based Runtime QA Matrix).
+
+### No Source Code Changed
+
+- ✅ No `.ts` / `.tsx` files modified
+- ✅ No backend endpoints, schemas, or business rules modified
+- ✅ No `package.json` / `package-lock.json` modified
+- ✅ No mobile behavior changed
+- ✅ No invalid role terminology introduced
+
+---
+
 ## Future Phases
 
-See Phase 8C → Next Recommended Phases table above.
+### Phase 9C — Role-Based Runtime QA Matrix (Recommended Next)
+
+**Status:** 🟡 RECOMMENDED
+
+**Purpose:** Systematically verify that the admin, doctor, and reception roles behave correctly across all desktop and mobile routes. Discover any remaining permission gaps or UI inconsistencies without making implementation changes.
+
+**Scope:** Discovery/audit only in the first pass. No implementation changes unless a concrete bug is found during testing.
+
+**Test Matrix Focus:**
+- Each role attempts to access every desktop route
+- Each role attempts to access every mobile route
+- Role-gated UI sections hidden/shown correctly
+- Backend returns correct 403 for unauthorized role attempts
+- No role can access or mutate data outside its permitted scope
+
+### Other Future Phases
+
+| Phase | Description |
+|-------|-------------|
+| Phase 10 | Real email/SMS integration |
+| Phase 11 | Server-side PDF generation |
+| Phase 12 | Production hardening — remove demo credentials, DB-backed audit trail |
+| Phase 13 | Mobile treatment plans — full create/edit/delete UI |
+| Phase 14 | HIPAA/GDPR compliance review |

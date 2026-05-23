@@ -6,7 +6,7 @@ A full-stack dental practice management system covering appointments, patients, 
 
 ## Overview
 
-The Dental Clinic System is a TypeScript monorepo (Express API + React SPA) designed for small-to-medium dental practices. It ships with a rich desktop interface for front-desk staff, dentists, and clinic managers, plus a lightweight mobile interface for on-the-go appointment and patient management.
+The Dental Clinic System is a TypeScript monorepo (Express API + React SPA) designed for small-to-medium dental practices. It ships with a rich desktop interface for clinic administrators, doctors, and reception users, plus a lightweight mobile interface for on-the-go appointment and patient management.
 
 All data is stored in-memory by default (demo mode). PostgreSQL persistence is available when `DATABASE_URL` is set.
 
@@ -115,9 +115,9 @@ npm run seed:terms   # Load medical autocomplete terms
 | `/reports` | Financial and operational reports, receivables aging |
 | `/recalls` | Recall/follow-up management |
 | `/whatsapp` | WhatsApp integration status |
-| `/audit-log` | Admin-only audit trail |
-| `/users` | Staff/user account management |
-| `/settings` | Clinic settings, reminder templates, working hours |
+| `/audit-log` | Audit trail — route access gated by `canViewAuditLogs` (admin only) |
+| `/users` | User account management (admin only) |
+| `/settings` | Clinic settings, reminder templates, working hours — admin-only sections gated by permission helpers; Change Password available to all authenticated users |
 
 ---
 
@@ -135,6 +135,20 @@ Access the mobile interface by navigating to `/m` on any device.
 | `/m/billing` | Mobile billing view |
 | `/m/reports` | Mobile reports summary |
 | `/m/settings` | Mobile settings |
+
+---
+
+## Role Model
+
+The system has exactly three backend roles. All enforcement is done server-side — the frontend helpers are advisory UX only.
+
+| Role | Description |
+|------|-------------|
+| `admin` | Full access — all modules, settings, user management, audit log |
+| `doctor` | Clinical access — visits, treatment plans, financials, appointments |
+| `reception` | Appointment management, patient basics, billing view, reminders |
+
+Frontend permission helpers live in [`client/src/lib/permissions.ts`](client/src/lib/permissions.ts). The backend `requireRole()` middleware is the authoritative enforcement layer.
 
 ---
 
