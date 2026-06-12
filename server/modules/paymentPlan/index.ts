@@ -167,9 +167,9 @@ function getPlanSummary(plan: PaymentPlan, installments: PaymentInstallment[]) {
 
 // ─── Routes ────────────────────────────────────────────────────────────────
 
-// GET /api/payment-plans/patient/:patientId - Get patient's payment plans
-router.get("/patient/:patientId", (req, res) => {
-    const { patientId } = req.params;
+// GET /api/payment-plans/patient/:patientId - Get patient's payment plans (admin/reception only)
+router.get("/patient/:patientId", requireRole("admin", "reception"), (req, res) => {
+    const patientId = req.params.patientId as string;
 
     // Validate patient exists
     const patient = demoPatients.find((p) => p.id === patientId);
@@ -204,8 +204,8 @@ router.get("/patient/:patientId", (req, res) => {
     });
 });
 
-// POST /api/payment-plans/patient/:patientId - Create payment plan (admin/doctor only)
-router.post("/patient/:patientId", requireRole("admin", "doctor"), (req, res) => {
+// POST /api/payment-plans/patient/:patientId - Create payment plan (admin/reception only)
+router.post("/patient/:patientId", requireRole("admin", "reception"), (req, res) => {
     const patientId = req.params.patientId as string;
     const {
         title,
@@ -329,8 +329,8 @@ router.post("/patient/:patientId", requireRole("admin", "doctor"), (req, res) =>
     });
 });
 
-// PUT /api/payment-plans/:planId/status - Update plan status (admin/doctor only)
-router.put("/:planId/status", requireRole("admin", "doctor"), (req, res) => {
+// PUT /api/payment-plans/:planId/status - Update plan status (admin/reception only)
+router.put("/:planId/status", requireRole("admin", "reception"), (req, res) => {
     const planId = req.params.planId as string;
     const { status } = req.body;
 
@@ -379,8 +379,8 @@ router.put("/:planId/status", requireRole("admin", "doctor"), (req, res) => {
     });
 });
 
-// POST /api/payment-plans/installments/:installmentId/payment - Pay installment (admin/doctor only)
-router.post("/installments/:installmentId/payment", requireRole("admin", "doctor"), (req, res) => {
+// POST /api/payment-plans/installments/:installmentId/payment - Pay installment (admin/reception only)
+router.post("/installments/:installmentId/payment", requireRole("admin", "reception"), (req, res) => {
     const installmentId = req.params.installmentId as string;
     const { amount, note } = req.body;
 

@@ -12,8 +12,8 @@ function filterByDateRange(items: any[], field: string, start: Date, end: Date) 
     });
 }
 
-// Daily summary
-router.get("/daily", (req, res) => {
+// Daily summary (admin/doctor only)
+router.get("/daily", requireRole("admin", "doctor"), (req, res) => {
     const dateStr = (req.query.date as string) || new Date().toISOString().split("T")[0];
     const start = new Date(dateStr); start.setHours(0, 0, 0, 0);
     const end = new Date(dateStr); end.setHours(23, 59, 59, 999);
@@ -34,8 +34,8 @@ router.get("/daily", (req, res) => {
     });
 });
 
-// Monthly overview
-router.get("/monthly", (req, res) => {
+// Monthly overview (admin/doctor only)
+router.get("/monthly", requireRole("admin", "doctor"), (req, res) => {
     const month = parseInt(req.query.month as string) || new Date().getMonth() + 1;
     const year = parseInt(req.query.year as string) || new Date().getFullYear();
     const start = new Date(year, month - 1, 1);
@@ -78,8 +78,8 @@ router.get("/monthly", (req, res) => {
     });
 });
 
-// Patient statistics
-router.get("/patients", (req, res) => {
+// Patient statistics (admin/doctor only)
+router.get("/patients", requireRole("admin", "doctor"), (req, res) => {
     const from = req.query.from as string;
     const to = req.query.to as string;
 
@@ -104,8 +104,8 @@ router.get("/patients", (req, res) => {
     });
 });
 
-// Financial breakdown by procedure category
-router.get("/financial", (req, res) => {
+// Financial breakdown by procedure category (admin only)
+router.get("/financial", requireRole("admin"), (req, res) => {
     const from = req.query.from as string;
     const to = req.query.to as string;
 
@@ -170,8 +170,8 @@ router.get("/financial", (req, res) => {
     });
 });
 
-// Prescriptions report
-router.get("/prescriptions", (req, res) => {
+// Prescriptions report (admin/doctor only)
+router.get("/prescriptions", requireRole("admin", "doctor"), (req, res) => {
     const from = req.query.from as string;
     const to = req.query.to as string;
     const medication = (req.query.medication as string || "").toLowerCase().trim();
@@ -277,7 +277,8 @@ function enumeratePeriods(from: Date, to: Date, groupBy: "daily" | "weekly" | "m
     return keys;
 }
 
-router.get("/owner-summary", (req, res) => {
+// Owner summary (admin only)
+router.get("/owner-summary", requireRole("admin"), (req, res) => {
     try {
         const fromStr = (req.query.from as string) || utcDate(new Date(Date.now() - 29 * 86400000));
         const toStr = (req.query.to as string) || utcDate(new Date());

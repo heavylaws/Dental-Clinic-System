@@ -1,19 +1,19 @@
 ﻿import { Router } from "express";
-import { requireAuth } from "../auth/index.js";
+import { requireAuth, requireRole } from "../auth/index.js";
 import { demoBillings, getLiveDemoBillings, getLiveDemoVisits, demoVisits, demoPatients } from "../../demo-store.js";
 import { v4 as uuidv4 } from "uuid";
 
 const router = Router();
 router.use(requireAuth);
 
-// Get billing for a visit
-router.get("/visit/:visitId", (req, res) => {
+// Get billing for a visit (admin/reception only)
+router.get("/visit/:visitId", requireRole("admin", "reception"), (req, res) => {
     const billing = demoBillings.find((b) => b.visitId === req.params.visitId);
     res.json(billing || null);
 });
 
-// Billing summary (filtered by date)
-router.get("/", (req, res) => {
+// Billing summary (filtered by date) (admin/reception only)
+router.get("/", requireRole("admin", "reception"), (req, res) => {
     const { startDate, endDate } = req.query;
     let start: Date, end: Date;
     if (startDate) {
@@ -52,8 +52,8 @@ router.get("/", (req, res) => {
     res.json({ billings: results, totalBilled, totalPaid, outstanding: totalBilled - totalPaid });
 });
 
-// Create billing
-router.post("/", (req, res) => {
+// Create billing (admin/reception only)
+router.post("/", requireRole("admin", "reception"), (req, res) => {
     const billing = {
         id: uuidv4(),
         currency: "USD",
@@ -69,16 +69,16 @@ router.post("/", (req, res) => {
     res.status(201).json(billing);
 });
 
-// Update billing
-router.put("/:id", (req, res) => {
+// Update billing (admin/reception only)
+router.put("/:id", requireRole("admin", "reception"), (req, res) => {
     const idx = demoBillings.findIndex((b) => b.id === req.params.id);
     if (idx === -1) return res.status(404).json({ error: "Billing not found" });
     demoBillings[idx] = { ...demoBillings[idx], ...req.body };
     res.json(demoBillings[idx]);
 });
 
-// Add payment
-router.post("/:id/payments", (req, res) => {
+// Add payment (admin/reception only)
+router.post("/:id/payments", requireRole("admin", "reception"), (req, res) => {
     const billing = demoBillings.find((b) => b.id === req.params.id);
     if (!billing) return res.status(404).json({ error: "Billing not found" });
     const payment = { id: uuidv4(), billingId: req.params.id, method: "cash", paidAt: new Date().toISOString(), ...req.body };

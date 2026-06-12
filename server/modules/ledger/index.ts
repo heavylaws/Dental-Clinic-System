@@ -522,9 +522,9 @@ function computeAgingReport(asOfDate: Date = new Date()): AgingReport {
 
 // ─── Routes ────────────────────────────────────────────────────────────────
 
-// GET /api/ledger/patient/:patientId - Get patient ledger
-router.get("/patient/:patientId", (req, res) => {
-    const { patientId } = req.params;
+// GET /api/ledger/patient/:patientId - Get patient ledger (admin/reception only)
+router.get("/patient/:patientId", requireRole("admin", "reception"), (req, res) => {
+    const patientId = req.params.patientId as string;
     const ledger = computePatientLedger(patientId);
 
     if (!ledger) {
@@ -534,21 +534,21 @@ router.get("/patient/:patientId", (req, res) => {
     res.json(ledger);
 });
 
-// GET /api/ledger/patients - Get all patient balances
-router.get("/patients", (_req, res) => {
+// GET /api/ledger/patients - Get all patient balances (admin/reception only)
+router.get("/patients", requireRole("admin", "reception"), (_req, res) => {
     const summaries = computeAllPatientBalances();
     res.json(summaries);
 });
 
-// GET /api/ledger/aging - Get aging report for all patients
-router.get("/aging", (_req, res) => {
+// GET /api/ledger/aging - Get aging report for all patients (admin/reception only)
+router.get("/aging", requireRole("admin", "reception"), (_req, res) => {
     const report = computeAgingReport();
     res.json(report);
 });
 
-// GET /api/ledger/patient/:patientId/aging - Get aging for specific patient
-router.get("/patient/:patientId/aging", (req, res) => {
-    const { patientId } = req.params;
+// GET /api/ledger/patient/:patientId/aging - Get aging for specific patient (admin/reception only)
+router.get("/patient/:patientId/aging", requireRole("admin", "reception"), (req, res) => {
+    const patientId = req.params.patientId as string;
     const aging = computePatientAging(patientId);
 
     if (!aging) {
@@ -558,8 +558,8 @@ router.get("/patient/:patientId/aging", (req, res) => {
     res.json(aging);
 });
 
-// POST /api/ledger/patient/:patientId/adjustment - Add manual adjustment (admin/doctor only)
-router.post("/patient/:patientId/adjustment", requireRole("admin", "doctor"), (req, res) => {
+// POST /api/ledger/patient/:patientId/adjustment - Add manual adjustment (admin/reception only)
+router.post("/patient/:patientId/adjustment", requireRole("admin", "reception"), (req, res) => {
     const patientId = req.params.patientId as string;
     const { amount, description, direction } = req.body;
 
@@ -772,9 +772,9 @@ async function computePatientStatementData(
     };
 }
 
-// GET /api/ledger/patient/:patientId/statement - Get patient account statement
-router.get("/patient/:patientId/statement", async (req, res) => {
-    const { patientId } = req.params;
+// GET /api/ledger/patient/:patientId/statement - Get patient account statement (admin/reception only)
+router.get("/patient/:patientId/statement", requireRole("admin", "reception"), async (req, res) => {
+    const patientId = req.params.patientId as string;
     const { from, to } = req.query;
 
     const computed = await computePatientStatementData(
@@ -809,8 +809,8 @@ interface StatementShareLog {
 // In-memory share logs for demo (resets on server restart)
 const demoStatementShareLogs: StatementShareLog[] = [];
 
-// POST /api/ledger/patient/:patientId/statement/share - Share statement
-router.post("/patient/:patientId/statement/share", async (req, res) => {
+// POST /api/ledger/patient/:patientId/statement/share - Share statement (admin/reception only)
+router.post("/patient/:patientId/statement/share", requireRole("admin", "reception"), async (req, res) => {
     const patientId = req.params.patientId as string;
     const { from, to, channel, message: customMessage } = req.body as {
         from?: string;
@@ -1092,8 +1092,8 @@ router.post("/patient/:patientId/statement/share", async (req, res) => {
 // A post-response audit hook would require refactoring the handler significantly;
 // instead we rely on the HTTP-level audit middleware for statement share logging.
 
-// GET /api/ledger/patient/:patientId/statement/share-logs - Get share history
-router.get("/patient/:patientId/statement/share-logs", (req, res) => {
+// GET /api/ledger/patient/:patientId/statement/share-logs - Get share history (admin/reception only)
+router.get("/patient/:patientId/statement/share-logs", requireRole("admin", "reception"), (req, res) => {
     const { patientId } = req.params;
 
     // Validate patient exists
