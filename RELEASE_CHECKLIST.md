@@ -1,6 +1,6 @@
 # Dental Clinic System — Release Checklist
 
-> **Phase 9B3** · Last updated: May 2026  
+> **Phase 9C-P0** · Last updated: June 2026  
 > Run this checklist before tagging any release or handing off to a new team.
 
 ---
@@ -186,10 +186,30 @@ The system enforces exactly three backend roles. The backend `requireRole()` mid
 | Role | Access |
 |------|--------|
 | `admin` | Full system — all modules, settings, user management, audit log |
-| `doctor` | Clinical — patients, visits, treatment plans, financials, appointments |
-| `reception` | Appointments, patient basics, billing view, reminders |
+| `doctor` | Clinical — patients, visits, treatment plans, general reports, appointments |
+| `reception` | Appointments, patient basics, billing/ledger/payment plans/statements, reminders |
 
 Only the three roles above are valid. Any other role string is non-canonical and must not be used in source code, configuration, or documentation.
+
+### Adopted Permission Policy (Phase 9C-P0)
+
+Source-of-truth policy for Phase 9C implementation. Backend remains the source of truth for permissions and business rules; frontend role gating is UX only. Phase 9C-F1 will align backend and frontend implementation with this policy.
+
+| Area | Allowed roles |
+|------|---------------|
+| Appointments | `admin`, `doctor`, `reception` |
+| Reminder patient preferences | `admin`, `doctor`, `reception` |
+| Reminder scheduler/settings | `admin` only |
+| Treatment plans | `admin`, `doctor` |
+| Treatment item conversion | `admin`, `doctor` |
+| Billing invoices/payments | `admin`, `reception` |
+| Ledger / payment plans / patient statements | `admin`, `reception` |
+| Financial reports / owner summary | `admin` only |
+| General reports | `admin`, `doctor` |
+| User management | `admin` only |
+| Audit log | `admin` only |
+| Settings admin sections | `admin` only |
+| Change password | `admin`, `doctor`, `reception` |
 
 ---
 
@@ -201,7 +221,12 @@ Only the three roles above are valid. Any other role string is non-canonical and
 | Phase 9B1 | ✅ COMPLETE — frontend permission helper infrastructure (`client/src/lib/permissions.ts`) |
 | Phase 9B2 | ✅ COMPLETE — audit log route gating, settings UI permission gating, mobile role UI alignment, role terminology cleanup |
 | Phase 9B3 | ✅ COMPLETE — documentation sync for Phase 9B2 |
-| Phase 9C | Role-Based Runtime QA Matrix — test admin/doctor/reception behavior across desktop and mobile; discovery/audit only first, no implementation unless a bug is found |
+| Phase 9C-0 | ✅ COMPLETE — baseline verification and runtime QA matrix planning (no files changed) |
+| Phase 9C-1 | ✅ COMPLETE — backend permission guard audit (no files changed) |
+| Phase 9C-P0 | ✅ COMPLETE — adopted role permission policy (documentation-only) |
+| Phase 9C-F1 | Backend and frontend/mobile permission alignment with the adopted policy |
+| Phase 9C-2/9C-3 | Desktop and mobile role-based runtime QA matrices |
+| Phase 9C-4 | Final role-permission QA documentation |
 | Phase 10 | Real email/SMS integration — configure Nodemailer or SendGrid; integrate SMS provider |
 | Phase 11 | Server-side PDF generation — use Puppeteer or pdfkit for statements, receipts, treatment plans |
 | Phase 12 | Production hardening — remove demo credentials, add proper user management, audit trail to DB |

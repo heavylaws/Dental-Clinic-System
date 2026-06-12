@@ -145,10 +145,30 @@ The system has exactly three backend roles. All enforcement is done server-side 
 | Role | Description |
 |------|-------------|
 | `admin` | Full access — all modules, settings, user management, audit log |
-| `doctor` | Clinical access — visits, treatment plans, financials, appointments |
-| `reception` | Appointment management, patient basics, billing view, reminders |
+| `doctor` | Clinical access — visits, treatment plans, general reports, appointments |
+| `reception` | Appointment management, patient basics, billing/ledger/payment plans, reminders |
 
 Frontend permission helpers live in [`client/src/lib/permissions.ts`](client/src/lib/permissions.ts). The backend `requireRole()` middleware is the authoritative enforcement layer.
+
+### Adopted Permission Policy (Phase 9C-P0)
+
+| Area | Allowed roles |
+|------|---------------|
+| Appointments | `admin`, `doctor`, `reception` |
+| Reminder patient preferences | `admin`, `doctor`, `reception` |
+| Reminder scheduler/settings | `admin` only |
+| Treatment plans | `admin`, `doctor` |
+| Treatment item conversion | `admin`, `doctor` |
+| Billing invoices/payments | `admin`, `reception` |
+| Ledger / payment plans / patient statements | `admin`, `reception` |
+| Financial reports / owner summary | `admin` only |
+| General reports | `admin`, `doctor` |
+| User management | `admin` only |
+| Audit log | `admin` only |
+| Settings admin sections | `admin` only |
+| Change password | `admin`, `doctor`, `reception` |
+
+Backend is the source of truth for permissions; frontend role gating is UX only.
 
 ---
 

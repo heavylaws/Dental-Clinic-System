@@ -3425,11 +3425,79 @@ Synchronize all project documentation after Phase 9B2. Ensure the role model, pe
 
 ---
 
+## Phase 9C-0 — Baseline Verification and Runtime QA Matrix Planning
+
+**Status:** ✅ COMPLETE
+**Date:** 2026-06
+**Type:** Audit-only. No files changed.
+
+Phase 9C-0 completed baseline verification and runtime QA matrix planning:
+
+- Repo verified on branch `main`, clean working tree, latest commit `f90ff75 docs: sync role gating documentation`.
+- Phase 9B3 confirmed committed and visible in git history.
+- Role-based runtime QA matrix planned for `admin`, `doctor`, `reception` across desktop and mobile.
+- No source code was changed in this phase.
+
+---
+
+## Phase 9C-1 — Backend Permission Guard Audit
+
+**Status:** ✅ COMPLETE
+**Date:** 2026-06
+**Type:** Audit-only. No files changed.
+
+Phase 9C-1 completed a backend permission guard audit and found financial/report permission inconsistencies requiring policy adoption before implementation:
+
+- Billing endpoints (create/update/payment) are currently auth-only.
+- Desktop and mobile Billing visibility points toward `admin` + `reception`, while the existing `canManageFinancials` helper points toward `admin` + `doctor` — a policy conflict.
+- Reports endpoints are auth-only while frontend navigation hides Reports from `reception`.
+- Users backend is correctly admin-only, but the desktop direct-route UX may need frontend gating cleanup.
+- Treatment plan and conversion backend guards are `admin` + `doctor`; reception UX needs runtime confirmation.
+- No backend permission bug was patched before the approved permission policy was documented.
+- No source code was changed in this phase.
+
+---
+
+## Phase 9C-P0 — Adopted Role Permission Policy
+
+**Status:** ✅ COMPLETE
+**Date:** 2026-06-12
+**Type:** Documentation-only. No source code changed.
+
+Phase 9C-P0 adopts the approved permission policy below as the source-of-truth for Phase 9C implementation. Backend remains the source of truth for permissions and business rules; frontend role gating is UX only. Phase 9C-F1 will align backend and frontend implementation with this policy.
+
+### Approved Target Permission Policy
+
+| Area | Allowed roles |
+|------|---------------|
+| Appointments | `admin`, `doctor`, `reception` |
+| Reminder patient preferences | `admin`, `doctor`, `reception` |
+| Reminder scheduler/settings | `admin` only |
+| Treatment plans | `admin`, `doctor` |
+| Treatment item conversion | `admin`, `doctor` |
+| Billing invoices/payments | `admin`, `reception` |
+| Ledger / payment plans / patient statements | `admin`, `reception` |
+| Financial reports / owner summary | `admin` only |
+| General reports | `admin`, `doctor` |
+| User management | `admin` only |
+| Audit log | `admin` only |
+| Settings admin sections | `admin` only |
+| Change password | `admin`, `doctor`, `reception` |
+
+### Notes
+
+- Only `admin`, `doctor`, and `reception` are valid role values.
+- This policy supersedes the earlier `admin` + `doctor` financial-management helper model: billing, ledger, payment plans, and patient statements move to `admin` + `reception`.
+- Financial reports and owner summary become admin-only; general reports (daily/monthly/patients/prescriptions) become `admin` + `doctor`.
+- No source code was changed in this phase.
+
+---
+
 ## Future Phases
 
-### Phase 9C — Role-Based Runtime QA Matrix (Recommended Next)
+### Phase 9C — Role-Based Runtime QA Matrix (In Progress)
 
-**Status:** 🟡 RECOMMENDED
+**Status:** 🟡 IN PROGRESS — 9C-0, 9C-1, and 9C-P0 complete; 9C-F1 (implementation alignment), 9C-2/9C-3 (runtime QA), and 9C-4 (final QA docs) remain
 
 **Purpose:** Systematically verify that the admin, doctor, and reception roles behave correctly across all desktop and mobile routes. Discover any remaining permission gaps or UI inconsistencies without making implementation changes.
 

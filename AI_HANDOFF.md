@@ -1,6 +1,6 @@
 # DermClinic System — AI Handoff Document
 
-> **Last updated**: 2026-05-23  
+> **Last updated**: 2026-06-12  
 > **Codebase**: ~114 source files, ~17,500 lines of TypeScript/TSX/CSS  
 > **Repository**: `heavylaws/ClinicSystem` (branch: `main`)
 
@@ -173,19 +173,32 @@ clinicsystem/
 - **Session duration**: 8 hours
 - **Roles**: `admin`, `doctor`, `reception` (these are the only valid backend roles)
   - Admin: Full access (user management, settings, reports, audit log)
-  - Doctor: Clinical features (visits, diagnoses, prescriptions, labs, treatment plans, financials)
-  - Reception: Patient registration, queue management, billing view, appointments, reminders
+  - Doctor: Clinical features (visits, diagnoses, prescriptions, labs, treatment plans, general reports)
+  - Reception: Patient registration, queue management, billing/ledger/payment plans, appointments, reminders
 - **Backend is the source of truth**: All role enforcement is via `requireRole()` middleware. Frontend checks in `client/src/lib/permissions.ts` are advisory UI-only.
-- **Frontend permission helpers** (`client/src/lib/permissions.ts`):
-  - `canViewAuditLogs` — admin only
-  - `canManageSettings` — admin only
-  - `canManageReminderSettings` — admin only
-  - `canManageAppointments` — admin, doctor, reception
-  - `canManageReminderPreferences` — admin, doctor, reception
-  - `canManageFinancials` — admin, doctor
-  - `canManageTreatmentPlans` — admin, doctor
-  - `canConvertTreatmentItems` — admin, doctor
 - **Bootstrap**: If no users exist, `POST /api/auth/bootstrap` creates a default admin
+
+### Adopted Permission Policy (Phase 9C-P0)
+
+The following policy was adopted in Phase 9C-P0 and is the source-of-truth for Phase 9C-F1 backend/frontend permission alignment. Phase 9C-0 completed baseline verification and runtime QA matrix planning; Phase 9C-1 completed the backend permission guard audit. No source code was changed in those phases.
+
+| Area | Allowed roles |
+|------|---------------|
+| Appointments | `admin`, `doctor`, `reception` |
+| Reminder patient preferences | `admin`, `doctor`, `reception` |
+| Reminder scheduler/settings | `admin` only |
+| Treatment plans | `admin`, `doctor` |
+| Treatment item conversion | `admin`, `doctor` |
+| Billing invoices/payments | `admin`, `reception` |
+| Ledger / payment plans / patient statements | `admin`, `reception` |
+| Financial reports / owner summary | `admin` only |
+| General reports | `admin`, `doctor` |
+| User management | `admin` only |
+| Audit log | `admin` only |
+| Settings admin sections | `admin` only |
+| Change password | `admin`, `doctor`, `reception` |
+
+Note: the pre-9C `canManageFinancials` helper (`admin` + `doctor`) is superseded by this policy — financial operations (billing, ledger, payment plans, statements) belong to `admin` + `reception`. Phase 9C-F1 will align helpers and backend guards accordingly.
 
 ---
 
