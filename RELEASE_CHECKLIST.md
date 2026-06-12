@@ -1,6 +1,6 @@
 # Dental Clinic System — Release Checklist
 
-> **Phase 9C-P0** · Last updated: June 2026  
+> **Phase 9C-4** · Last updated: June 2026  
 > Run this checklist before tagging any release or handing off to a new team.
 
 ---
@@ -40,11 +40,11 @@ Start the server (`npm run dev`) and verify each route loads without errors.
 | `/appointments` | Calendar/list view loads; appointments display; drag-and-drop available |
 | `/patients` | Patient list loads; search works |
 | `/patient/:id` | Patient file loads; tabs (visits, billing, treatment plans, dental chart, ledger) all accessible |
-| `/billing` | Invoice list loads; payment plans tab accessible; statements tab accessible |
-| `/reports` | Financial summary renders; receivables aging table renders |
+| `/billing` | Invoice list loads (admin/reception only — doctor is redirected); payment plans tab accessible; statements tab accessible |
+| `/reports` | Admin: Owner Analytics + aging + Prescription Report; doctor: Prescription Report only; reception is redirected |
 | `/recalls` | Recall list renders |
 | `/settings` | Clinic settings load (admin-only sections hidden for non-admins); Change Password section available to all authenticated users |
-| `/users` | User list renders (admin only) |
+| `/users` | User list renders (admin only — non-admin users are redirected) |
 | `/audit-log` | Audit trail renders — access gated by `canViewAuditLogs`; non-admin users are redirected |
 | `/whatsapp` | WhatsApp status page loads |
 
@@ -56,7 +56,7 @@ Start the server (`npm run dev`) and verify each route loads without errors.
 | `/m/appointments` | Appointment cards render; confirm/complete/cancel buttons visible |
 | `/m/patients` | Patient search renders |
 | `/m/patient/:id` | Mobile patient file renders |
-| `/m/billing` | Mobile billing renders |
+| `/m/billing` | Mobile billing renders (admin/reception only — doctor is redirected to `/m`) |
 | `/m/reports` | Mobile reports renders |
 | `/m/settings` | Mobile settings renders |
 
@@ -224,9 +224,10 @@ Source-of-truth policy for Phase 9C implementation. Backend remains the source o
 | Phase 9C-0 | ✅ COMPLETE — baseline verification and runtime QA matrix planning (no files changed) |
 | Phase 9C-1 | ✅ COMPLETE — backend permission guard audit (no files changed) |
 | Phase 9C-P0 | ✅ COMPLETE — adopted role permission policy (documentation-only) |
-| Phase 9C-F1 | Backend and frontend/mobile permission alignment with the adopted policy |
-| Phase 9C-2/9C-3 | Desktop and mobile role-based runtime QA matrices |
-| Phase 9C-4 | Final role-permission QA documentation |
+| Phase 9C-F1A | ✅ COMPLETE — backend permission guard alignment (commit `6434093`) |
+| Phase 9C-F1B | ✅ COMPLETE — frontend/mobile permission UX alignment (commit `8a322b2`) |
+| Phase 9C-2/9C-3 | ✅ COMPLETE — desktop + mobile runtime role QA: 57/57 API permission checks passed for admin/doctor/reception |
+| Phase 9C-4 | ✅ COMPLETE — final role-permission QA documentation (this update) |
 | Phase 10 | Real email/SMS integration — configure Nodemailer or SendGrid; integrate SMS provider |
 | Phase 11 | Server-side PDF generation — use Puppeteer or pdfkit for statements, receipts, treatment plans |
 | Phase 12 | Production hardening — remove demo credentials, add proper user management, audit trail to DB |

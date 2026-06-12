@@ -198,7 +198,19 @@ The following policy was adopted in Phase 9C-P0 and is the source-of-truth for P
 | Settings admin sections | `admin` only |
 | Change password | `admin`, `doctor`, `reception` |
 
-Note: the pre-9C `canManageFinancials` helper (`admin` + `doctor`) is superseded by this policy — financial operations (billing, ledger, payment plans, statements) belong to `admin` + `reception`. Phase 9C-F1 will align helpers and backend guards accordingly.
+Phase 9C-F1 aligned implementation with this policy (backend commit `6434093`, frontend commit `8a322b2`). Current frontend helpers in `client/src/lib/permissions.ts`:
+
+- `canViewAuditLogs` — admin
+- `canManageSettings` — admin
+- `canManageReminderSettings` — admin
+- `canManageUsers` — admin
+- `canViewFinancialReports` — admin
+- `canViewGeneralReports` — admin, doctor
+- `canManageTreatmentPlans` / `canConvertTreatmentItems` — admin, doctor
+- `canManageFinancials` — admin, reception (billing, ledger, payment plans, statements)
+- `canManageAppointments` / `canManageReminderPreferences` — admin, doctor, reception
+
+Runtime role QA (Phase 9C-2/9C-3): 57/57 API permission checks passed for all three roles.
 
 ---
 
@@ -352,6 +364,10 @@ Then access via `https://<server-ip>:3443`.
 | `848b7bd` | feat: use permission helpers for settings UI gating |
 | `c45f627` | fix: align mobile role UI with backend roles (admin, doctor, reception) |
 | `6de5ec7` | chore: align role terminology with backend roles |
+| `f90ff75` | docs: sync role gating documentation (Phase 9B3) |
+| `8efb5b3` | docs: adopt role permission policy (Phase 9C-P0) |
+| `6434093` | fix: align backend permission guards (Phase 9C-F1A) |
+| `8a322b2` | fix: align frontend permission gates (Phase 9C-F1B) |
 
 ---
 

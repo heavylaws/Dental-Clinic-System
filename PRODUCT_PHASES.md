@@ -3493,11 +3493,81 @@ Phase 9C-P0 adopts the approved permission policy below as the source-of-truth f
 
 ---
 
+## Phase 9C-F1 — Backend and Frontend Permission Alignment
+
+**Status:** ✅ COMPLETE
+**Date:** 2026-06-12
+
+### Phase 9C-F1A — Backend Permission Guard Alignment (commit `6434093`)
+
+Backend-only patch. Only role guards, guard comments, and `req.params` typing casts changed. No route paths, financial calculations, schemas, or business logic changed.
+
+| File | Route guard changes |
+|------|--------------------|
+| `server/modules/billing/index.ts` | All 5 routes (GET /visit/:visitId, GET /, POST /, PUT /:id, POST /:id/payments) → `requireRole("admin", "reception")` (previously auth-only) |
+| `server/modules/ledger/index.ts` | All 8 routes (patient ledger, patients, aging ×2, adjustment, statement, share, share-logs) → `requireRole("admin", "reception")` (adjustment changed from `admin, doctor`) |
+| `server/modules/paymentPlan/index.ts` | GET + create/status/installment-payment → `requireRole("admin", "reception")` (mutations changed from `admin, doctor`) |
+| `server/modules/report/index.ts` | `financial`, `owner-summary` → `requireRole("admin")`; `daily`, `monthly`, `patients`, `prescriptions` → `requireRole("admin", "doctor")` (all previously auth-only) |
+
+Unchanged (already aligned): users, treatment plans/conversion, appointments, reminder settings/preferences, audit log, settings, change password.
+
+### Phase 9C-F1B — Frontend/Mobile Permission UX Alignment (commit `8a322b2`)
+
+Frontend-only patch (UX gating; backend remains source of truth):
+
+- `client/src/lib/permissions.ts` — `canManageFinancials` → `admin + reception`; added `canViewGeneralReports` (`admin + doctor`) and `canViewFinancialReports` (`admin`).
+- `client/src/App.tsx` — direct routes gated: `/reports` (admin+doctor), `/billing` (admin+reception), `/users` (admin).
+- `client/src/pages/Reports.tsx` — Owner Analytics tab + aging data admin-only; doctors default to Prescription Report tab.
+- `client/src/pages/Dashboard.tsx` — receivables aging card/query gated to admin+reception.
+- `client/src/pages/PatientFile.tsx` — Account Ledger and Payment Plans tabs gated to admin+reception; Collect Payment button gated; visit-form billing amount input and billing create gated; treatment plans rendered read-only for reception.
+- `client/src/components/patient/TreatmentPlanBuilder.tsx` — new `readOnly` prop hides plan creation, item add/edit/delete, status changes, and convert controls.
+- `client/src/mobile/MobileApp.tsx` — `/m/billing` route gated to admin+reception; `/m/reports` route gated to admin+doctor.
+- `client/src/mobile/pages/MobileDashboard.tsx` / `MobileBilling.tsx` — daily-report queries skipped for roles not allowed by the reports backend (prevents silent 403s for reception).
+- `client/src/mobile/pages/MobileVisitForm.tsx` — billing amount input and billing create gated to admin+reception.
+
+Build results: `npx tsc --noEmit` ✅, `npx tsc -p tsconfig.server.json --noEmit` ✅, `npx vite build` ✅.
+
+---
+
+## Phase 9C-2 / 9C-3 — Desktop and Mobile Runtime Role QA
+
+**Status:** ✅ COMPLETE
+**Date:** 2026-06-12
+
+Runtime QA executed against the dev server (in-memory demo mode) using session-authenticated API requests for all three roles. **Result: 57/57 checks passed, 0 failures.**
+
+| Check | admin | doctor | reception |
+|-------|-------|--------|-----------|
+| Login | ✅ 200 | ✅ 200 | ✅ 200 |
+| GET/POST billing | ✅ allowed | ✅ 403 | ✅ allowed |
+| Ledger read/aging/adjustment | ✅ allowed | ✅ 403 | ✅ allowed |
+| Payment plan mutations | ✅ allowed (guard passed) | ✅ 403 | ✅ allowed (guard passed) |
+| General reports (daily/prescriptions) | ✅ 200 | ✅ 200 | ✅ 403 |
+| Financial report / owner summary | ✅ 200 | ✅ 403 | ✅ 403 |
+| Users | ✅ 200 | ✅ 403 | ✅ 403 |
+| Audit log | ✅ 200 | ✅ 403 | ✅ 403 |
+| Treatment plan create/convert | ✅ guard passed | ✅ guard passed | ✅ 403 |
+| Reminder settings mutation | ✅ 200 | ✅ 403 | ✅ 403 |
+| Reminder preferences | ✅ 200 | ✅ 200 | ✅ 200 |
+| Appointments list | ✅ 200 | ✅ 200 | ✅ 200 |
+| Settings read / mutation | ✅ 200 / 200 | ✅ 200 / 403 | ✅ 200 / 403 |
+
+Mobile UX verification (code-level + route behavior):
+
+- Bottom tabs: Billing visible to admin+reception only; Queue/Patients/Appts/More for all roles.
+- `/m/billing` and `/m/reports` direct routes redirect unauthorized roles to `/m`.
+- Mobile settings shows canonical role labels (`Administrator`, `Doctor`, `Reception`); admin section (User Management, Clinic Settings, Reports) admin-only.
+- Change Password available to all roles (desktop `/settings` and mobile).
+
+Note: backend guards (verified by 403 matrix above) protect all sensitive mobile/desktop direct access regardless of UI gating.
+
+---
+
 ## Future Phases
 
-### Phase 9C — Role-Based Runtime QA Matrix (In Progress)
+### Phase 9C — Role-Based Runtime QA Matrix
 
-**Status:** 🟡 IN PROGRESS — 9C-0, 9C-1, and 9C-P0 complete; 9C-F1 (implementation alignment), 9C-2/9C-3 (runtime QA), and 9C-4 (final QA docs) remain
+**Status:** ✅ COMPLETE — 9C-0, 9C-1, 9C-P0, 9C-F1A, 9C-F1B, 9C-2, 9C-3, and 9C-4 all complete
 
 **Purpose:** Systematically verify that the admin, doctor, and reception roles behave correctly across all desktop and mobile routes. Discover any remaining permission gaps or UI inconsistencies without making implementation changes.
 
