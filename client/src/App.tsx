@@ -3,7 +3,7 @@ import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import MobileApp from "./mobile/MobileApp";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "./lib/api";
-import { canViewAuditLogs } from "./lib/permissions";
+import { canViewAuditLogs, canManageFinancials, canManageUsers, canViewGeneralReports } from "./lib/permissions";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import PatientFile from "./pages/PatientFile";
@@ -92,14 +92,14 @@ function DesktopApp() {
                 <Route path="/" element={<Dashboard user={user} />} />
                 <Route path="/room/:id" element={<PatientFile user={user} />} /> {/* Keep backend room logic if needed, but patient file is main */}
                 <Route path="/patient/:id" element={<PatientFile user={user} />} />
-                <Route path="/reports" element={<Reports />} />
+                <Route path="/reports" element={canViewGeneralReports(user) ? <Reports /> : <Navigate to="/" replace />} />
                 <Route path="/patients" element={<Patients />} />
-                <Route path="/billing" element={<Billing />} />
+                <Route path="/billing" element={canManageFinancials(user) ? <Billing /> : <Navigate to="/" replace />} />
                 <Route path="/appointments" element={<Appointments />} />
                 <Route path="/recalls" element={<Recalls />} />
                 <Route path="/audit-log" element={canViewAuditLogs(user) ? <AuditLog /> : <Navigate to="/" replace />} />
                 <Route path="/whatsapp" element={<WhatsApp />} />
-                <Route path="/users" element={<Users />} />
+                <Route path="/users" element={canManageUsers(user) ? <Users /> : <Navigate to="/" replace />} />
                 <Route path="/settings" element={<Settings />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />

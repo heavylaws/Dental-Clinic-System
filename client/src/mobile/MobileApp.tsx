@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
+import { canManageFinancials, canViewGeneralReports } from "../lib/permissions";
 import MobileLayout from "./components/MobileLayout";
 import MobileDashboard from "./pages/MobileDashboard";
 import MobilePatientFile from "./pages/MobilePatientFile";
@@ -56,9 +57,9 @@ export default function MobileApp() {
         <Route path="patient/:id" element={<MobilePatientFile user={user} />} />
         <Route path="visit/:visitId" element={<MobileVisitForm user={user} />} />
         <Route path="appointments" element={<MobileAppointments />} />
-        <Route path="billing" element={<MobileBilling />} />
+        <Route path="billing" element={canManageFinancials(user) ? <MobileBilling /> : <Navigate to="/m" replace />} />
         <Route path="settings" element={<MobileSettings user={user} />} />
-        <Route path="reports" element={<MobileReports />} />
+        <Route path="reports" element={canViewGeneralReports(user) ? <MobileReports /> : <Navigate to="/m" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="/m" replace />} />
     </Routes>

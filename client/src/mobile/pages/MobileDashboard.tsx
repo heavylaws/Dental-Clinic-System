@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../lib/api";
+import { canViewGeneralReports } from "../../lib/permissions";
 import { useWebSocket } from "../../lib/ws";
 import MobileHeader from "../components/MobileHeader";
 import MobileSearchBar from "../components/MobileSearchBar";
@@ -34,9 +35,11 @@ export default function MobileDashboard({ user }: MobileDashboardProps) {
     enabled: searchQuery.length >= 1,
   });
 
+  // Daily report backend is requireRole("admin", "doctor") — skip for reception
   const { data: dailySummary } = useQuery({
     queryKey: ["reports", "daily"],
     queryFn: () => api.reports.daily(),
+    enabled: canViewGeneralReports(user),
   });
 
   useWebSocket("queue:update", () => refetchQueue());

@@ -1,20 +1,25 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
+import { canViewGeneralReports } from "../../lib/permissions";
 import MobileHeader from "../components/MobileHeader";
 
 export default function MobileBilling() {
   const today = new Date().toISOString().split("T")[0];
   const [dateRange] = useState({ start: today, end: today });
 
+  const { data: user } = useQuery({ queryKey: ["auth", "me"], queryFn: api.auth.me, retry: false });
+
   const { data: billing, isLoading } = useQuery({
     queryKey: ["billing", dateRange],
     queryFn: () => api.billing.get(dateRange.start, dateRange.end),
   });
 
+  // Daily report backend is requireRole("admin", "doctor") — skip for reception
   const { data: daily } = useQuery({
     queryKey: ["reports", "daily"],
     queryFn: () => api.reports.daily(),
+    enabled: canViewGeneralReports(user as any),
   });
 
   return (

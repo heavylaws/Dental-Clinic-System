@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
+import { canManageFinancials } from "../../lib/permissions";
 import MobileHeader from "../components/MobileHeader";
 import { useHapticFeedback } from "../hooks/useHapticFeedback";
 
@@ -132,7 +133,8 @@ export default function MobileVisitForm({ user }: { user: any }) {
   const completeVisit = useMutation({
     mutationFn: async () => {
       await api.visits.updateNotes(visitId!, { chiefComplaint: complaint, clinicalNotes: notes });
-      if (billingAmount) await api.billing.create({ visitId: visitId!, totalAmount: billingAmount, currency: "USD" });
+      // Billing create is admin/reception only (backend guard)
+      if (billingAmount && canManageFinancials(user)) await api.billing.create({ visitId: visitId!, totalAmount: billingAmount, currency: "USD" });
       await api.visits.updateStatus(visitId!, "completed");
     },
     onSuccess: () => {
@@ -409,13 +411,15 @@ export default function MobileVisitForm({ user }: { user: any }) {
               <div className="mobile-card"><p className="mobile-section-label">Referrals</p>
                 {addedReferrals.map(r => <p key={r.id} style={{ margin: "0 0 2px", color: "#e2e8f0", fontSize: "0.88rem" }}>📤 {r.referredTo} ({r.specialty})</p>)}</div>
             )}
-            <div>
-              <label style={{ display: "block", fontSize: "0.82rem", fontWeight: 700, color: "#94a3b8", marginBottom: "6px" }}>
-                💰 Billing Amount (USD)
-              </label>
-              <input type="number" value={billingAmount} onChange={e => setBillingAmount(e.target.value)}
-                className="mobile-input" placeholder="0.00" inputMode="decimal" />
-            </div>
+            {canManageFinancials(user) && (
+              <div>
+                <label style={{ display: "block", fontSize: "0.82rem", fontWeight: 700, color: "#94a3b8", marginBottom: "6px" }}>
+                  💰 Billing Amount (USD)
+                </label>
+                <input type="number" value={billingAmount} onChange={e => setBillingAmount(e.target.value)}
+                  className="mobile-input" placeholder="0.00" inputMode="decimal" />
+              </div>
+            )}
             <button onClick={() => completeVisit.mutate()} disabled={completeVisit.isPending}
               className="mobile-btn mobile-btn-success" style={{ marginTop: "8px" }}>
               {completeVisit.isPending ? "Completing..." : "✅ Complete Visit"}

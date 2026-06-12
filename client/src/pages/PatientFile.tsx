@@ -12,6 +12,7 @@ import ReceiptPrint from "../components/ReceiptPrint";
 import ReferralPrint from "../components/ReferralPrint";
 import CameraCapture from "../components/CameraCapture";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { canManageFinancials, canManageTreatmentPlans } from "../lib/permissions";
 import { DentalChart } from "../components/patient/DentalChart";
 import { TreatmentPlanBuilder } from "../components/patient/TreatmentPlanBuilder";
 import PrescriptionsTable from "../components/patient/PrescriptionsTable";
@@ -215,18 +216,22 @@ export default function PatientFile({ user }: PatientFileProps) {
                                         >
                                             📸 Photos
                                         </TabsTrigger>
-                                        <TabsTrigger
-                                            value="ledger"
-                                            className="px-4 py-2 rounded-lg data-[state=active]:bg-white data-[state=active]:text-primary-700 data-[state=active]:shadow-sm font-semibold text-gray-500"
-                                        >
-                                            💰 Account Ledger
-                                        </TabsTrigger>
-                                        <TabsTrigger
-                                            value="payment_plans"
-                                            className="px-4 py-2 rounded-lg data-[state=active]:bg-white data-[state=active]:text-primary-700 data-[state=active]:shadow-sm font-semibold text-gray-500"
-                                        >
-                                            📅 Payment Plans
-                                        </TabsTrigger>
+                                        {canManageFinancials(user) && (
+                                            <TabsTrigger
+                                                value="ledger"
+                                                className="px-4 py-2 rounded-lg data-[state=active]:bg-white data-[state=active]:text-primary-700 data-[state=active]:shadow-sm font-semibold text-gray-500"
+                                            >
+                                                💰 Account Ledger
+                                            </TabsTrigger>
+                                        )}
+                                        {canManageFinancials(user) && (
+                                            <TabsTrigger
+                                                value="payment_plans"
+                                                className="px-4 py-2 rounded-lg data-[state=active]:bg-white data-[state=active]:text-primary-700 data-[state=active]:shadow-sm font-semibold text-gray-500"
+                                            >
+                                                📅 Payment Plans
+                                            </TabsTrigger>
+                                        )}
                                     </TabsList>
                                 </div>
 
@@ -311,8 +316,8 @@ export default function PatientFile({ user }: PatientFileProps) {
                                                                     </button>
                                                                 )}
 
-                                                                {/* Pay Button */}
-                                                                {(!visit.billing || visit.billing.status !== "paid") && (
+                                                                {/* Pay Button (admin/reception only) */}
+                                                                {canManageFinancials(user) && (!visit.billing || visit.billing.status !== "paid") && (
                                                                     <button
                                                                         onClick={() => setBillingVisitId(visit.id)}
                                                                         className="p-2 bg-green-100 text-green-600 rounded-lg hover:bg-green-200 transition"
@@ -450,7 +455,7 @@ export default function PatientFile({ user }: PatientFileProps) {
                                 </TabsContent>
 
                                 <TabsContent value="treatment_plans">
-                                    <TreatmentPlanBuilder patientId={id!} />
+                                    <TreatmentPlanBuilder patientId={id!} readOnly={!canManageTreatmentPlans(user)} />
                                 </TabsContent>
                                 <TabsContent value="medications">
                                     <PrescriptionsTable
@@ -475,13 +480,17 @@ export default function PatientFile({ user }: PatientFileProps) {
                                     <PhotoGallery patientId={id!} visitHistory={visitHistory} />
                                 </TabsContent>
 
-                                <TabsContent value="ledger">
-                                    <AccountLedger patientId={id!} />
-                                </TabsContent>
+                                {canManageFinancials(user) && (
+                                    <TabsContent value="ledger">
+                                        <AccountLedger patientId={id!} />
+                                    </TabsContent>
+                                )}
 
-                                <TabsContent value="payment_plans">
-                                    <PaymentPlansSection patientId={id!} user={user} />
-                                </TabsContent>
+                                {canManageFinancials(user) && (
+                                    <TabsContent value="payment_plans">
+                                        <PaymentPlansSection patientId={id!} user={user} />
+                                    </TabsContent>
+                                )}
                             </Tabs>
                         </div>
                     </div>
@@ -801,8 +810,8 @@ function VisitForm({
                 clinicalNotes: notes,
                 examination,
             });
-            // Create or update billing if amount provided
-            if (billingAmount) {
+            // Create or update billing if amount provided (admin/reception only — backend guard)
+            if (billingAmount && canManageFinancials(user)) {
                 await api.billing.create({
                     visitId,
                     totalAmount: billingAmount,
@@ -1295,18 +1304,20 @@ function VisitForm({
                     )}
                 </div>
 
-                {/* ─── Billing ─── */}
-                <div>
-                    <label className="block text-lg font-bold text-gray-700 mb-2">💰 Amount (USD)</label>
-                    <input
-                        type="number"
-                        value={billingAmount}
-                        onChange={(e) => setBillingAmount(e.target.value)}
-                        placeholder="0.00"
-                        className="w-48 border-2 border-gray-200 rounded-lg px-4 py-3 text-xl focus:border-primary-500 outline-none"
-                        step="0.01"
-                    />
-                </div>
+                {/* ─── Billing (admin/reception only) ─── */}
+                {canManageFinancials(user) && (
+                    <div>
+                        <label className="block text-lg font-bold text-gray-700 mb-2">💰 Amount (USD)</label>
+                        <input
+                            type="number"
+                            value={billingAmount}
+                            onChange={(e) => setBillingAmount(e.target.value)}
+                            placeholder="0.00"
+                            className="w-48 border-2 border-gray-200 rounded-lg px-4 py-3 text-xl focus:border-primary-500 outline-none"
+                            step="0.01"
+                        />
+                    </div>
+                )}
 
                 {/* ─── Actions ─── */}
                 <div className="flex flex-wrap gap-4 pt-6 border-t border-primary-100 items-center justify-between">

@@ -7,8 +7,8 @@
  *
  * Roles (from server/modules/auth):
  *   admin     – full access
- *   doctor    – clinical + financial (appointments, billing, treatment plans, conversion)
- *   reception – front-desk (appointments, reminder preferences, manual reminders)
+ *   doctor    – clinical (appointments, treatment plans, conversion, general reports)
+ *   reception – front-desk (appointments, billing, ledger, payment plans, reminders)
  */
 
 // ─── Types ──────────────────────────────────────────────────────────
@@ -70,13 +70,30 @@ export function canManageAppointments(user: PermissionUser | null | undefined): 
 }
 
 /**
- * Financial mutations: billing, ledger adjustments, payment plans.
- * Backend guards:
- *   - `requireRole("admin", "doctor")` on POST /ledger/patient/:id/adjustment
- *   - `requireRole("admin", "doctor")` on payment-plan create/status/installment-payment
+ * Financial operations: billing invoices/payments, ledger, payment plans, statements.
+ * Backend guards (Phase 9C-F1A):
+ *   - `requireRole("admin", "reception")` on all /billing routes
+ *   - `requireRole("admin", "reception")` on all /ledger routes (read, aging, adjustment, statement, share)
+ *   - `requireRole("admin", "reception")` on all /payment-plans routes
  */
 export function canManageFinancials(user: PermissionUser | null | undefined): boolean {
+  return hasRole(user, ["admin", "reception"]);
+}
+
+/**
+ * General reports (daily / monthly / patients / prescriptions).
+ * Backend: `requireRole("admin", "doctor")` on GET /reports/daily, /monthly, /patients, /prescriptions.
+ */
+export function canViewGeneralReports(user: PermissionUser | null | undefined): boolean {
   return hasRole(user, ["admin", "doctor"]);
+}
+
+/**
+ * Financial reports and owner summary.
+ * Backend: `requireRole("admin")` on GET /reports/financial and /reports/owner-summary.
+ */
+export function canViewFinancialReports(user: PermissionUser | null | undefined): boolean {
+  return hasRole(user, "admin");
 }
 
 /**

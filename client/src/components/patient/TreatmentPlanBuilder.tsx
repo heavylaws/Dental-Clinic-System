@@ -4,6 +4,8 @@ import ToothChart, { AREA_OPTIONS, PROCEDURE_PRESETS } from "./ToothChart";
 
 interface Props {
     patientId: string;
+    /** Hide all mutation controls (reception is read-only; backend guards are admin+doctor). */
+    readOnly?: boolean;
 }
 
 type PlanStatus = "draft" | "presented" | "accepted" | "partially_accepted" | "declined" | "completed" | "cancelled";
@@ -60,7 +62,7 @@ interface TreatmentPlansResponse {
     plans: TreatmentPlanData[];
 }
 
-export function TreatmentPlanBuilder({ patientId }: Props) {
+export function TreatmentPlanBuilder({ patientId, readOnly = false }: Props) {
     const [plansData, setPlansData] = useState<TreatmentPlansResponse | null>(null);
     const [loading, setLoading] = useState(true);
     const [expandedPlanId, setExpandedPlanId] = useState<string | null>(null);
@@ -127,7 +129,7 @@ export function TreatmentPlanBuilder({ patientId }: Props) {
                             {presentationMode ? "🖥️ Exit Presentation" : "🖥️ Presentation Mode"}
                         </button>
                     )}
-                    {!presentationMode && (
+                    {!presentationMode && !readOnly && (
                         <button
                             onClick={createPlan}
                             className="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 shadow-sm font-medium"
@@ -155,6 +157,7 @@ export function TreatmentPlanBuilder({ patientId }: Props) {
                             onToggle={() => setExpandedPlanId(expandedPlanId === planData.plan.id ? null : planData.plan.id)}
                             onUpdate={loadPlans}
                             presentationMode={presentationMode}
+                            readOnly={readOnly}
                         />
                     ))}
                 </div>
@@ -170,6 +173,7 @@ function TreatmentPlanCard({
     onToggle,
     onUpdate,
     presentationMode = false,
+    readOnly = false,
 }: {
     planData: TreatmentPlanData;
     patientName: string;
@@ -177,6 +181,7 @@ function TreatmentPlanCard({
     onToggle: () => void;
     onUpdate: () => Promise<void>;
     presentationMode?: boolean;
+    readOnly?: boolean;
 }) {
     const { plan, items, summary } = planData;
     const [addingItem, setAddingItem] = useState(false);
@@ -667,20 +672,22 @@ Questions? Contact us at the clinic.
                     </div>
                 </div>
                 <div className="flex items-center gap-2 ml-2">
-                    <select
-                        value={plan.status}
-                        onChange={(e) => updatePlanStatus(e.target.value as PlanStatus)}
-                        onClick={(e) => e.stopPropagation()}
-                        className="text-xs border-gray-300 rounded-md shadow-sm px-2 py-1"
-                    >
-                        <option value="draft">Draft</option>
-                        <option value="presented">Presented</option>
-                        <option value="accepted">Accepted</option>
-                        <option value="partially_accepted">Partially Accepted</option>
-                        <option value="declined">Declined</option>
-                        <option value="completed">Completed</option>
-                        <option value="cancelled">Cancelled</option>
-                    </select>
+                    {!readOnly && (
+                        <select
+                            value={plan.status}
+                            onChange={(e) => updatePlanStatus(e.target.value as PlanStatus)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-xs border-gray-300 rounded-md shadow-sm px-2 py-1"
+                        >
+                            <option value="draft">Draft</option>
+                            <option value="presented">Presented</option>
+                            <option value="accepted">Accepted</option>
+                            <option value="partially_accepted">Partially Accepted</option>
+                            <option value="declined">Declined</option>
+                            <option value="completed">Completed</option>
+                            <option value="cancelled">Cancelled</option>
+                        </select>
+                    )}
                     <span className="text-gray-400 transform transition-transform duration-200" style={{ transform: expanded ? "rotate(180deg)" : "rotate(0deg)" }}>
                         ▼
                     </span>
@@ -761,7 +768,7 @@ Questions? Contact us at the clinic.
                                         <th className="pb-2">Priority</th>
                                         <th className="pb-2">Status</th>
                                         <th className="pb-2 text-right">Cost</th>
-                                        {!presentationMode && <th className="pb-2 text-center">Actions</th>}
+                                        {!presentationMode && !readOnly && <th className="pb-2 text-center">Actions</th>}
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
@@ -782,7 +789,7 @@ Questions? Contact us at the clinic.
                                                 </span>
                                             </td>
                                             <td className="py-2">
-                                                {presentationMode ? (
+                                                {presentationMode || readOnly ? (
                                                     <span className={`text-xs px-2 py-1 rounded ${getItemStatusColor(item.status)}`}>
                                                         {item.status.charAt(0).toUpperCase() + item.status.slice(1)}
                                                     </span>
@@ -803,7 +810,7 @@ Questions? Contact us at the clinic.
                                             <td className="py-2 text-right font-medium text-gray-900">
                                                 {formatCurrency(item.estimatedCost)}
                                             </td>
-                                            {!presentationMode && (
+                                            {!presentationMode && !readOnly && (
                                                 <td className="py-2 text-center">
                                                     <div className="flex justify-center gap-1 flex-wrap">
                                                         {/* Convert button for accepted, not-converted items */}
@@ -851,7 +858,7 @@ Questions? Contact us at the clinic.
                     )}
 
                     {/* Add Item Button */}
-                    {!presentationMode && !addingItem && !editingItem && (
+                    {!presentationMode && !readOnly && !addingItem && !editingItem && (
                         <button
                             onClick={() => setAddingItem(true)}
                             className="w-full py-2 border-2 border-dashed border-gray-300 rounded-lg text-gray-500 hover:border-primary-400 hover:text-primary-600 transition font-medium"

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
+import { canViewFinancialReports } from "../lib/permissions";
 import AutocompleteInput from "../components/AutocompleteInput";
 
 type GroupBy = "daily" | "weekly" | "monthly";
@@ -228,7 +229,14 @@ function Kpi({ icon, label, value, accent }: { icon: string; label: string; valu
 // ─── Main Component ─────────────────────────────────────────────────
 
 export default function Reports() {
-    const [tab, setTab] = useState<"owner" | "prescription">("owner");
+    const { data: user } = useQuery({ queryKey: ["auth", "me"], queryFn: api.auth.me });
+    // Owner Analytics (owner-summary + aging) is admin-only per Phase 9C-P0 policy.
+    const showOwnerTab = canViewFinancialReports(user as any);
+
+    const [selectedTab, setSelectedTab] = useState<"owner" | "prescription" | null>(null);
+    // Default tab: Owner Analytics for admin, Prescription Report otherwise.
+    const tab: "owner" | "prescription" = selectedTab ?? (showOwnerTab ? "owner" : "prescription");
+    const setTab = (t: "owner" | "prescription") => setSelectedTab(t);
 
     // ── Owner Analytics filters ─
     const [from, setFrom] = useState(isoNDaysAgo(29));
@@ -246,13 +254,15 @@ export default function Reports() {
     } = useQuery({
         queryKey: ["reports", "owner-summary", from, to, groupBy],
         queryFn: () => api.reports.ownerSummary(from, to, groupBy),
+        enabled: showOwnerTab,
     });
 
-    // ── Aging data (Phase 6D2) ─
+    // ── Aging data (Phase 6D2) ─ admin-only (backend: admin + reception; doctors never see this page section)
     const { data: agingData, isLoading: agingLoading, isError: agingError } = useQuery({
         queryKey: ["ledger", "aging"],
         queryFn: () => api.ledger.aging(),
         refetchInterval: 60000,
+        enabled: showOwnerTab,
     });
 
     // ── Prescription tab state ─
@@ -268,8 +278,6 @@ export default function Reports() {
         queryFn: () => api.reports.prescriptions(rxStart, rxEnd, medicationFilter),
         enabled: false,
     });
-
-    const { data: user } = useQuery({ queryKey: ["auth", "me"], queryFn: api.auth.me });
 
     // ── Sorted doctor production ─
     const sortedDoctors = useMemo(() => {
@@ -461,7 +469,7 @@ th { background: #f9fafb; font-weight: 600; color: #374151; }
             {/* ─── Tabs ─── */}
             <div className="flex gap-1 border-b border-gray-200 mb-6">
                 {[
-                    { id: "owner", label: "📊 Owner Analytics" },
+                    ...(showOwnerTab ? [{ id: "owner", label: "📊 Owner Analytics" }] : []),
                     { id: "prescription", label: "💊 Prescription Report" },
                 ].map((t) => (
                     <button
@@ -475,8 +483,8 @@ th { background: #f9fafb; font-weight: 600; color: #374151; }
                 ))}
             </div>
 
-            {/* ─── Owner Analytics Tab ─── */}
-            {tab === "owner" && (
+            {/* ─── Owner Analytics Tab (admin only) ─── */}
+            {tab === "owner" && showOwnerTab && (
                 <div className="space-y-6">
                     {/* Filter bar */}
                     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex flex-wrap items-end gap-3">

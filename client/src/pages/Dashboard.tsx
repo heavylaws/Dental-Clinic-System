@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
+import { canManageFinancials } from "../lib/permissions";
 import { useWebSocket } from "../lib/ws";
 import NewPatientDialog from "../components/NewPatientDialog";
 import BillVisitDialog from "../components/BillVisitDialog";
@@ -209,10 +210,13 @@ export default function Dashboard({ user }: DashboardProps) {
     });
 
     // ─── Aging query (Phase 6D2) ─────────────────────────────────────
+    // Admin/reception only: ledger aging backend is requireRole("admin", "reception")
+    const showAging = canManageFinancials(user);
     const { data: agingData, isLoading: isLoadingAging, isError: isAgingError } = useQuery({
         queryKey: ["ledger", "aging"],
         queryFn: () => api.ledger.aging(),
         refetchInterval: 60000,
+        enabled: showAging,
     });
 
     const { data: serverInfo } = useQuery({
@@ -354,7 +358,7 @@ export default function Dashboard({ user }: DashboardProps) {
                 )}
 
                 {/* ═══ Receivables Aging Card (Phase 6D2) ═══════════════════ */}
-                {isLoadingAging ? (
+                {!showAging ? null : isLoadingAging ? (
                     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
                         <div className="flex items-center gap-3 text-gray-500">
                             <div className="animate-spin h-5 w-5 border-b-2 border-gray-600"></div>
